@@ -1,11 +1,34 @@
 import random
 
-from mesa.time import StagedActivation
 from .agent import IndepAgent, Young
 
 
-class StagedActivationModif(StagedActivation):
-    # TODO : add/separate agents by type ??? Is it a good idea ??
+class StagedActivationModif:
+    """Standalone staged-activation scheduler.
+
+    Formerly subclassed mesa.time.StagedActivation, but bilangsim fully overrides
+    step(); only the trivial bookkeeping from the Mesa base class is reproduced here.
+    """
+
+    def __init__(self, model, stage_list, shuffle=False, shuffle_between_stages=False):
+        self.model = model
+        self.steps = 0
+        self.time = 0
+        self.agents = []
+        self.stage_list = stage_list
+        self.shuffle = shuffle
+        self.shuffle_between_stages = shuffle_between_stages
+        self.stage_time = 1 / len(stage_list)
+
+    def add(self, agent):
+        self.agents.append(agent)
+
+    def remove(self, agent):
+        while agent in self.agents:
+            self.agents.remove(agent)
+
+    def get_agent_count(self):
+        return len(self.agents)
 
     def step(self, pct_threshold=0.9):
         """ Executes all the stages for all agents """
