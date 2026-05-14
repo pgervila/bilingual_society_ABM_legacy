@@ -1,6 +1,5 @@
 # Author: Paolo Gervasoni
 
-from __future__ import division
 # IMPORT RELEVANT LIBRARIES
 import os
 import bisect
@@ -36,7 +35,7 @@ np.random.seed(np_seed)
 
 print('rand_seed is {}'.format(rand_seed))
 print('np_seed is {}'.format(np_seed))
-print('python hash seed is', os.environ['PYTHONHASHSEED'])
+print('python hash seed is', os.environ.get('PYTHONHASHSEED', 'not set'))
 
 
 class BiLangModel(Model):
