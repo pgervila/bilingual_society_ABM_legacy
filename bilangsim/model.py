@@ -750,6 +750,9 @@ class BiLangModel:
                 * save_dir : string. It specifies directory where frames will be saved
         """
         self.save_dir = save_dir
+        # propagate save_dir to the data processor, which is what actually
+        # writes the result parts and model pickles
+        self.data_process.save_dir = save_dir
         if viz_steps_period:
             script_dir = os.path.dirname(__file__)
             results_dir = os.path.join(script_dir, save_dir)

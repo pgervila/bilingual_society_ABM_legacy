@@ -240,38 +240,34 @@ class DataProcessor:
         # get dataframes from stored data
         df_model_data = self.get_model_vars_dataframe()
         df_agent_data = self.get_agent_vars_dataframe()
-        # save dataframes
-        save_path = os.path.join(self.save_dir, 'model_data.h5')
-        # TODO: add reinitialization option
+        # save each flush as a numbered Parquet part (zero-padded so lexical sort
+        # == chronological order); load_model_data concatenates the parts
+        part = self.model.schedule.steps // save_data_freq
+        df_model_data.to_parquet(
+            os.path.join(self.save_dir, f'model_data_part{part:05d}.parquet'))
+        df_agent_data.to_parquet(
+            os.path.join(self.save_dir, f'agent_data_part{part:05d}.parquet'))
         if self.model.schedule.steps == save_data_freq:
-            with pd.HDFStore(save_path, mode='w') as hdf_db:
-                hdf_db.append('model_data', df_model_data, format='t', data_columns=True)
-                hdf_db.append('agent_data', df_agent_data, format='t', data_columns=True,
-                              min_itemsize={'agent_type': 11})
-                ics = pd.DataFrame.from_dict(self.init_conds, orient='index').T
-                ics.to_hdf(save_path, key='init_conds')
-        else:
-            df_model_data.to_hdf(save_path, key='model_data',
-                                 append=True, mode='r+', format='table', data_columns=True)
-            df_agent_data.to_hdf(save_path, key='agent_data',
-                                 append=True, mode='r+', format='table', data_columns=True)
+            # init_conds holds numpy arrays as cell values, so pickle it rather
+            # than force it through Parquet's columnar typing
+            with open(os.path.join(self.save_dir, 'init_conds.pkl'), 'wb') as f:
+                dill.dump(self.init_conds, f)
         # empty data to avoid keeping already-saved data in RAM
         self.model_vars = {k: [] for k in self.model_vars}
         self.agent_vars = {k: [] for k in self.agent_vars}
 
     @staticmethod
-    def load_model_data(data_filename, key='/'):
-        return dd.io.load(data_filename, key)
+    def load_model_data(save_dir=''):
+        """Load all Parquet result parts written by save_model_data.
 
-    def optimize_data_saving_space(self, filename='model_data.h5'):
-        save_path = os.path.join(self.save_dir, filename)
-        opt_save_path = os.path.join(self.save_dir, 'opt_model_data.h5')
-        with pd.HDFStore(save_path) as f:
-            for n in f.keys():
-                data = pd.read_hdf(f, n)
-                data.to_hdf(opt_save_path, n)
-        os.remove(save_path)
-        os.rename(opt_save_path, save_path)
+        Returns (model_df, agent_df); either may be None if no parts exist.
+        """
+        import glob
+        model_parts = sorted(glob.glob(os.path.join(save_dir, 'model_data_part*.parquet')))
+        agent_parts = sorted(glob.glob(os.path.join(save_dir, 'agent_data_part*.parquet')))
+        model_df = pd.concat([pd.read_parquet(p) for p in model_parts]) if model_parts else None
+        agent_df = pd.concat([pd.read_parquet(p) for p in agent_parts]) if agent_parts else None
+        return model_df, agent_df
 
 
 class DataViz:
