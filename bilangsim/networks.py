@@ -1,6 +1,7 @@
 import random
 import numpy as np
 import networkx as nx
+from scipy.sparse import csr_matrix
 
 from sklearn.preprocessing import normalize
 import warnings
@@ -225,13 +226,16 @@ class NetworkBuilder:
                 * Method sets value of adj_mat_fam_nw and adj_mat_friend_nw NetworkBuilder
                     class attributes
         """
+        # modern networkx returns a csr_array, whose single-row indexing yields a
+        # coo_array (no .indices/.data); wrap in the legacy csr_matrix so that
+        # downstream row-slicing keeps CSR semantics
         fam_graph = nx.adjacency_matrix(self.model.nws.family_network,
                                         nodelist=self.model.schedule.agents)
-        self.model.nws.adj_mat_fam_nw = normalize(fam_graph, norm='l1', axis=1)
+        self.model.nws.adj_mat_fam_nw = csr_matrix(normalize(fam_graph, norm='l1', axis=1))
         # compute adjacent matrices for friends
         friend_graph = nx.adjacency_matrix(self.model.nws.friendship_network,
                                            nodelist=self.model.schedule.agents)
-        self.model.nws.adj_mat_friend_nw = normalize(friend_graph, norm='l1', axis=1)
+        self.model.nws.adj_mat_friend_nw = csr_matrix(normalize(friend_graph, norm='l1', axis=1))
 
     def plot_family_networks(self):
         """ PLOT NETWORK with lang colors and position """

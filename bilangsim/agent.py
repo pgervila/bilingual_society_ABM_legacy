@@ -111,37 +111,6 @@ class BaseAgent:
         # initialize conversation counter for data collection
         self._conv_counts_per_step = 0
 
-    def _set_lang_attrs(self, lang, pct_key):
-        """ Private method that sets agent linguistic statistics for a GIVEN AGE
-            Args:
-                * lang: string. It can take two different values: 'L1' or 'L2'
-                * pct_key: string. It must be of the form '%_pct' with % an integer
-                  from following list of available levels [10, 25, 50, 75, 90, 100].
-                  ICs are not available for every single level
-        """
-
-        # numpy array(shape=vocab_size) that counts elapsed steps from last activation of each word
-        self.lang_stats[lang]['t'] = np.copy(self.model.lang_ICs[pct_key]['t'][self.info['age']]).astype(np.float64)
-        # S: numpy array(shape=vocab_size) that measures memory stability for each word
-        self.lang_stats[lang]['S'] = np.copy(self.model.lang_ICs[pct_key]['S'][self.info['age']])
-        # compute R from t, S (R defines retrievability of each word)
-        self.lang_stats[lang]['R'] = np.exp(- self.k *
-                                                  self.lang_stats[lang]['t'] /
-                                                  self.lang_stats[lang]['S']
-                                                  ).astype(np.float64)
-        # word counter
-        self.lang_stats[lang]['wc'] = np.copy(self.model.lang_ICs[pct_key]['wc'][self.info['age']])
-        # vocab pct
-        self.lang_stats[lang]['pct'] = np.zeros(self.max_life_steps, dtype=np.float64)
-        self.lang_stats[lang]['pct'][self.info['age']] = (np.where(self.lang_stats[lang]['R'] > 0.9)[0].shape[0] /
-                                                          len(self.model.cdf_data['s'][self.info['age']]))
-
-        # memory effort per compressed word
-        self.set_memory_effort_per_word(lang)
-
-        # conversation failure counter
-        self.lang_stats[lang]['excl_c'] = np.zeros(self.max_life_steps, dtype=np.float64)
-
     def _set_null_lang_attrs(self, lang, S_0=0.01, t_0=1000):
         """Private method that sets null linguistic knowledge in specified language, i.e. no knowledge
            at all of it
@@ -168,32 +137,17 @@ class BaseAgent:
         self.set_excl_weights()
 
     def set_lang_ics(self, s_0=0.01, t_0=1000, biling_key=None):
-        """ Set agent's linguistic Initial Conditions by calling set up methods
-        Args:
-            * s_0: float <= 1. Initial memory intensity
-            * t_0: elapsed days from last word-activation
-            * biling_key: integer from [10, 25, 50, 75, 90, 100]. Numbers specify amount of time
-                agent has spoken given language throughout life. Specify only if specific bilingual level
-                is needed as input
-        """
-        if self.info['language'] == 0:
-            self._set_lang_attrs('L1', '100_pct')
-            self._set_null_lang_attrs('L2', s_0, t_0)
-        elif self.info['language'] == 2:
-            self._set_null_lang_attrs('L1', s_0, t_0)
-            self._set_lang_attrs('L2', '100_pct')
-        else: # BILINGUAL
-            # if key is not given, compute it randomly
-            if not biling_key:
-                biling_key = np.random.choice(self.model.ic_pct_keys)
-            L1_key = str(biling_key) + '_pct'
-            L2_key = str(100 - biling_key) + '_pct'
-            for lang, key in zip(['L1', 'L2'], [L1_key, L2_key]):
-                self._set_lang_attrs(lang, key)
-        # always null conditions for transition languages
-        self._set_null_lang_attrs('L12', s_0, t_0)
-        self._set_null_lang_attrs('L21', s_0, t_0)
+        """ Set agent's linguistic Initial Conditions.
 
+        The legacy per-age IC file (lang_spoken_ics_vs_step.h5) has been dropped.
+        All agents start from null linguistic knowledge; a realistic demography is
+        produced by the model's warmup phase instead (see BiLangModel warmup_steps).
+        `biling_key` is accepted for call-site compatibility but is currently a
+        no-op -- reintroducing graded initial bilingualism is deferred to the
+        model-improvement plan.
+        """
+        for lang in ('L1', 'L2', 'L12', 'L21'):
+            self._set_null_lang_attrs(lang, s_0, t_0)
         # set weights to model reaction to linguistic exclusion
         self.set_excl_weights()
 
@@ -988,7 +942,9 @@ class SpeakerAgent(ListenerAgent):
         if group:
             num_mates = random.randint(1, min(len(group), max_group_size))
             # Choose n = 'num_mates' unique random mates
-            speak_group = random.sample(group, num_mates)
+            # (random.sample requires a sequence since Python 3.11, so coerce
+            #  the group -- which may be a set -- to a list first)
+            speak_group = random.sample(list(group), num_mates)
             self.model.run_conversation(self, speak_group, num_days=num_days)
             # talk to a single random mate
             random_mate = np.random.choice(speak_group)

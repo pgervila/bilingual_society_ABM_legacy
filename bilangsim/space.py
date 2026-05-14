@@ -49,3 +49,18 @@ class MultiGrid:
         for pos in cell_list:
             contents.extend(self._cell(pos))
         return contents
+
+    def __getitem__(self, x):
+        """Support mesa-style ``grid[x][y]`` indexing, returning the cell's agent set."""
+        return _GridColumn(self, x)
+
+
+class _GridColumn:
+    """Thin proxy so that ``grid[x][y]`` resolves to the agent set at (x, y)."""
+
+    def __init__(self, grid, x):
+        self._grid = grid
+        self._x = x
+
+    def __getitem__(self, y):
+        return self._grid._cell((self._x, y))
