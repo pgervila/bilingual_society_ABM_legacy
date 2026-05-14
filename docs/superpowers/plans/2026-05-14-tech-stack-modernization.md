@@ -722,7 +722,45 @@ git add bilangsim/model.py tests/test_smoke.py
 git commit -m "feat: add configurable warmup phase before data collection"
 ```
 
-**Phase 4 verification:** warmup test passes; `grep -rn '\.h5\|lang_ICs\|cdfs/' bilangsim/` shows no remaining data-file dependency; baseline holds.
+### Task 4.3: Warm up the test_model fixture to fix test_run_conversation
+
+**Files:**
+- Modify: `tests/test_model.py` — the module-scoped `model` fixture (~line 10)
+
+Background (from the Phase 3 baseline): `test_run_conversation` became seed-flaky
+because, under null ICs, step-0 agents have identically-null knowledge, so
+`get_conv_params`' knowledge-based MAXIMIN logic can't distinguish a label-only
+L1-monolingual from a label-only L2-monolingual. A warmup phase gives agents
+realistic knowledge that matches their `info['language']` labels.
+
+- [ ] **Step 1: Give the `model` fixture a warmup**
+
+In `tests/test_model.py`, change the `model` fixture to construct with a
+`warmup_steps` value large enough that agents reach non-degenerate knowledge,
+e.g. `BiLangModel(251, num_clusters=2, check_setup=True, warmup_steps=36)`
+(one simulated year). Pick the smallest value that makes the test reliable.
+
+- [ ] **Step 2: Verify test_run_conversation is now reliable**
+
+Run: `for i in 1 2 3 4 5; do PYTHONHASHSEED=0 uv run pytest tests/test_model.py::test_run_conversation -q --tb=line; done`
+Expected: PASS on all 5 runs. If still flaky, raise `warmup_steps`. If a longer
+warmup makes the module's other tests too slow, consider a separate
+warmed-model fixture used only by `test_run_conversation`.
+
+- [ ] **Step 3: Run the full suite**
+
+Run: `PYTHONHASHSEED=0 uv run pytest tests/ -v --tb=short`
+Expected: all tests pass — the Phase 3 ACCEPTED failure is now resolved, nothing
+else regressed.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add tests/test_model.py
+git commit -m "test: warm up the test_model fixture so test_run_conversation is deterministic"
+```
+
+**Phase 4 verification:** warmup test passes; `test_run_conversation` is reliable across seeds; `grep -rn '\.h5\|lang_ICs\|cdfs/' bilangsim/` shows no remaining data-file dependency; baseline holds.
 
 ---
 
