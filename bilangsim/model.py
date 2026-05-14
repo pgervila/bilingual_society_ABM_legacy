@@ -246,7 +246,12 @@ class BiLangModel:
             if par_lang in [0, 2]:
                 lang_with_parent = 0 if par_lang == 0 else 1
             else:
-                lang_with_parent = np.random.choice([0, 1], p=pcs / pcs.sum())
+                # weight the choice by the parent's L1/L2 knowledge; fall back to a
+                # uniform 50/50 when the parent has no measurable knowledge in
+                # either language (e.g. null ICs before the warmup phase)
+                pcs_total = pcs.sum()
+                p = pcs / pcs_total if pcs_total > 0 else None
+                lang_with_parent = np.random.choice([0, 1], p=p)
             langs_with_parents.append(lang_with_parent)
         lang_with_father = langs_with_parents[0] if parent1.info['sex'] == 'M' else langs_with_parents[1]
         lang_with_mother = langs_with_parents[1] if parent2.info['sex'] == 'M' else langs_with_parents[0]
