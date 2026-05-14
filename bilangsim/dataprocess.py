@@ -335,20 +335,23 @@ class DataViz:
 
 class VizImpData:
 
-    def __init__(self, file_name=None, key='/'):
-        self.data = dd.io.load(file_name, key)
+    def __init__(self, save_dir=''):
+        self.model_data, self.agent_data = DataProcessor.load_model_data(save_dir=save_dir)
 
     def show_imported_results(self, key='/'):
         pass
 
 
 class PostProcessor:
-    def __init__(self, data_filename, save_dir=''):
-        filepath = os.path.join(save_dir, data_filename)
-        with pd.HDFStore(filepath) as self.data:
-            self.agent_data = self.data['agent_data']
-            self.model_data = self.data['model_data']
-            self.init_conditions = self.data['init_conds']
+    def __init__(self, data_filename=None, save_dir=''):
+        # data_filename kept for call-site compatibility but unused: results are
+        # now loaded from the Parquet parts written by DataProcessor.save_model_data
+        self.model_data, self.agent_data = DataProcessor.load_model_data(save_dir=save_dir)
+        self.init_conditions = None
+        init_path = os.path.join(save_dir, 'init_conds.pkl')
+        if os.path.exists(init_path):
+            with open(init_path, 'rb') as f:
+                self.init_conditions = dill.load(f)
 
     def ag_results_by_id(self, ag_id):
         """ Args:
