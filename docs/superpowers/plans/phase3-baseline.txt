@@ -1,0 +1,115 @@
+# Phase 3 Test Baseline — bilangsim modernization
+
+Captured 2026-05-14 on the modern stack (Python 3.13.12, numpy 2.4.4,
+pandas 3.0.3, networkx 3.6.1, numba 0.65.1, scikit-learn 1.8.0).
+Command: PYTHONHASHSEED=0 uv run pytest tests/
+
+This is the regression baseline for Phases 4-6: any test that passes here
+must keep passing; the one ACCEPTED failure below is expected.
+
+## ACCEPTED failures (not regressions, not to be "fixed" in later phases except as noted)
+
+- tests/test_model.py::test_run_conversation — SEED-FLAKY (passes ~3/5 runs).
+  Root cause: the test builds an L1-monolingual + L2-monolingual pair and
+  asserts they cannot communicate (so do not become acquaintances). Under the
+  new null-IC regime, every step-0 agent has identically-null knowledge —
+  info['language'] is only a label, actual lang_stats knowledge is ~0 for all.
+  get_conv_params' MAXIMIN logic branches on real knowledge percentages, so the
+  mute decision for two label-only monolinguals becomes a random tie-break.
+  NOT a porting regression and NOT a model bug — a direct consequence of the
+  approved null-IC decision in the no-warmup regime.
+  RESOLUTION: Phase 4 gives test_model.py's shared `model` fixture a
+  `warmup_steps` value so agents reach realistic knowledge; the test should
+  then pass deterministically again.
+
+## Full run (one representative capture; test_run_conversation may show PASSED on other seeds)
+
+============================= test session starts ==============================
+tests/test_agent.py::test_pensioner_methods PASSED                       [  1%]
+tests/test_agent.py::test_teacher_methods PASSED                         [  2%]
+tests/test_agent.py::test_teacheruniv_methods PASSED                     [  3%]
+tests/test_agent.py::test_Baby_methods PASSED                            [  4%]
+tests/test_agent.py::test_Child_methods PASSED                           [  5%]
+tests/test_agent.py::test_Adolescent_methods PASSED                      [  7%]
+tests/test_agent.py::test_Young_methods PASSED                           [  8%]
+tests/test_agent.py::test_evolve[Baby-Child-labels0] PASSED              [  9%]
+tests/test_agent.py::test_evolve[Child-Adolescent-labels1] PASSED        [ 10%]
+tests/test_agent.py::test_evolve[Adolescent-Young-labels2] PASSED        [ 11%]
+tests/test_agent.py::test_evolve[Adolescent-YoungUniv-labels3] PASSED    [ 12%]
+tests/test_agent.py::test_evolve[Young-Adult-labels4] PASSED             [ 14%]
+tests/test_agent.py::test_evolve[YoungUniv-Young-labels5] PASSED         [ 15%]
+tests/test_agent.py::test_evolve[Adult-Pensioner-labels6] PASSED         [ 16%]
+tests/test_agent.py::test_evolve[Adult-Teacher-labels7] PASSED           [ 17%]
+tests/test_agent.py::test_evolve[Teacher-Pensioner-labels8] PASSED       [ 18%]
+tests/test_agent.py::test_evolve[Adult-TeacherUniv-labels9] PASSED       [ 20%]
+tests/test_agent.py::test_look_for_partner PASSED                        [ 21%]
+tests/test_agent.py::test_listen PASSED                                  [ 22%]
+tests/test_agent.py::test_move_to_new_home[True-None-None] PASSED        [ 23%]
+tests/test_agent.py::test_move_to_new_home[True-True-None] PASSED        [ 24%]
+tests/test_agent.py::test_move_to_new_home[True-True-True] PASSED        [ 25%]
+tests/test_agent.py::test_get_job[Young] PASSED                          [ 27%]
+tests/test_agent.py::test_get_job[Teacher] PASSED                        [ 28%]
+tests/test_agent.py::test_get_job[TeacherUniv] PASSED                    [ 29%]
+tests/test_agent.py::test_update_lang_arrays[sample_words0-listen] PASSED [ 30%]
+tests/test_agent.py::test_update_lang_arrays[sample_words1-speak] PASSED [ 31%]
+tests/test_agent.py::test_update_lang_arrays[sample_words2-listen] PASSED [ 32%]
+tests/test_agent.py::test_process_unknown_words[sample_words0-listen] PASSED [ 34%]
+tests/test_agent.py::test_process_unknown_words[sample_words1-speak] PASSED [ 35%]
+tests/test_agent.py::test_process_unknown_words[sample_words2-listen] PASSED [ 36%]
+tests/test_agent.py::test_update_words_memory[sample_words0-listen] PASSED [ 37%]
+tests/test_agent.py::test_update_words_memory[sample_words1-speak] PASSED [ 38%]
+tests/test_agent.py::test_update_words_memory[sample_words2-listen] PASSED [ 40%]
+tests/test_geomapping.py::test_add_new_school PASSED                     [ 41%]
+tests/test_home_and_jobs.py::test_home_assign_to_agent PASSED            [ 42%]
+tests/test_home_and_jobs.py::test_remove_agent PASSED                    [ 43%]
+tests/test_model.py::test_model_consistency[model_param0] PASSED         [ 44%]
+tests/test_model.py::test_model_consistency[model_param1] PASSED         [ 45%]
+tests/test_model.py::test_model_consistency[model_param2] PASSED         [ 47%]
+tests/test_model.py::test_model_consistency[model_param3] PASSED         [ 48%]
+tests/test_model.py::test_run_conversation FAILED                        [ 49%]
+tests/test_model.py::test_get_conv_params_strangers[langs0-pcts_10-pcts_20-expected0] PASSED [ 50%]
+tests/test_model.py::test_get_conv_params_strangers[langs1-pcts_11-pcts_21-expected1] PASSED [ 51%]
+tests/test_model.py::test_get_conv_params_strangers[langs2-pcts_12-pcts_22-expected2] PASSED [ 52%]
+tests/test_model.py::test_get_conv_params_strangers[langs3-pcts_13-pcts_23-expected3] PASSED [ 54%]
+tests/test_model.py::test_get_conv_params_strangers[langs4-pcts_14-pcts_24-expected4] PASSED [ 55%]
+tests/test_model.py::test_get_conv_params_strangers[langs5-pcts_15-pcts_25-expected5] PASSED [ 56%]
+tests/test_model.py::test_get_conv_params_strangers[langs6-pcts_16-pcts_26-expected6] PASSED [ 57%]
+tests/test_model.py::test_get_conv_params_strangers[langs7-pcts_17-pcts_27-expected7] PASSED [ 58%]
+tests/test_model.py::test_get_conv_params_strangers[langs8-pcts_18-pcts_28-expected8] PASSED [ 60%]
+tests/test_model.py::test_get_conv_params_strangers[langs9-pcts_19-pcts_29-expected9] PASSED [ 61%]
+tests/test_model.py::test_get_conv_params_strangers[langs10-pcts_110-pcts_210-expected10] PASSED [ 62%]
+tests/test_model.py::test_get_conv_params_strangers[langs11-pcts_111-pcts_211-expected11] PASSED [ 63%]
+tests/test_model.py::test_get_conv_params_family[langs0-pcts_10-pcts_20-langs_with_known0-expected0] PASSED [ 64%]
+tests/test_model.py::test_get_conv_params_family[langs1-pcts_11-pcts_21-langs_with_known1-expected1] PASSED [ 65%]
+tests/test_model.py::test_get_conv_params_family[langs2-pcts_12-pcts_22-langs_with_known2-expected2] PASSED [ 67%]
+tests/test_model.py::test_get_conv_params_family[langs3-pcts_13-pcts_23-langs_with_known3-expected3] PASSED [ 68%]
+tests/test_model.py::test_get_conv_params_family[langs4-pcts_14-pcts_24-langs_with_known4-expected4] PASSED [ 69%]
+tests/test_model.py::test_get_conv_params_family[langs5-pcts_15-pcts_25-langs_with_known5-expected5] PASSED [ 70%]
+tests/test_model.py::test_get_conv_relatives_with_stranger PASSED        [ 71%]
+tests/test_model.py::test_remove_after_death[Adult] PASSED               [ 72%]
+tests/test_model.py::test_remove_after_death[Adolescent] PASSED          [ 74%]
+tests/test_model.py::test_remove_after_death[Teacher] PASSED             [ 75%]
+tests/test_model.py::test_remove_after_death[Young] PASSED               [ 76%]
+tests/test_model.py::test_run PASSED                                     [ 77%]
+tests/test_model.py::test_add_immigration_family PASSED                  [ 78%]
+tests/test_model.py::test_add_immigration PASSED                         [ 80%]
+tests/test_model.py::test_update_frienship PASSED                        [ 81%]
+tests/test_model.py::test_remove_from_locations[False] PASSED            [ 82%]
+tests/test_model.py::test_remove_from_locations[True] PASSED             [ 83%]
+tests/test_networks.py::test_networks_consistency PASSED                 [ 84%]
+tests/test_networks.py::test_newborn_family_links PASSED                 [ 85%]
+tests/test_networks.py::test_set_link_with_relatives PASSED              [ 87%]
+tests/test_networks.py::test_friends_per_agent PASSED                    [ 88%]
+tests/test_school_univ.py::test_group_students_per_year PASSED           [ 89%]
+tests/test_school_univ.py::test_school_set_up_and_update PASSED          [ 90%]
+tests/test_school_univ.py::test_univ_set_up_and_update PASSED            [ 91%]
+tests/test_school_univ.py::test_hire_teachers PASSED                     [ 92%]
+tests/test_school_univ.py::test_teachers_course_swap PASSED              [ 94%]
+tests/test_school_univ.py::test_assign_new_stud_to_course PASSED         [ 95%]
+tests/test_school_univ.py::test_teacher_death PASSED                     [ 96%]
+tests/test_smoke.py::test_model_constructs PASSED                        [ 97%]
+tests/test_smoke.py::test_model_runs_short PASSED                        [ 98%]
+tests/test_space.py::test_place_move_remove_and_contents PASSED          [100%]
+=========================== short test summary info ============================
+FAILED tests/test_model.py::test_run_conversation - AssertionError: assert Ad...
+======================== 1 failed, 84 passed in 17.68s =========================
