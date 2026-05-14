@@ -65,6 +65,7 @@ class BiLangModel:
 
     steps_per_year = 36
     max_lifetime = 4000
+    max_life_steps = 3600
     langs = ('L1', 'L12', 'L21', 'L2')
     similarity_corr = {'L1': 'L2', 'L2': 'L1', 'L12': 'L2', 'L21': 'L1'}
     # avg conversation : 3 min, 20 sec
@@ -106,9 +107,9 @@ class BiLangModel:
         # define container for available ids
         self.set_available_ids = set(range(0, max_people_factor * num_people))
 
-        # import lang ICs and lang CDFs data as function of steps. Use directory of executed file
-        self.lang_ICs = dd.io.load(os.path.join(os.path.dirname(__file__), 'data', 'init_conds', 'lang_spoken_ics_vs_step.h5'))
-        self.cdf_data = dd.io.load(os.path.join(os.path.dirname(__file__), 'data', 'cdfs', 'lang_cdfs_vs_step.h5'))
+        # build age-indexed Zipf CDFs at runtime (replaces legacy lang_cdfs_vs_step.h5)
+        self._build_cdfs()
+        self.lang_ICs = None  # legacy IC file dropped; agents use null ICs (see set_lang_ics)
 
         # set init mode while building the model
         self.init_mode = True
@@ -142,6 +143,22 @@ class BiLangModel:
         # check model setup if requested
         if check_setup:
             self.check_model_set_up()
+
+    def _build_cdfs(self):
+        """Build age-indexed Zipf-Mandelbrot CDFs at construction time.
+
+        Replaces the legacy lang_cdfs_vs_step.h5 file. cdf_data['s'][age] is the
+        CDF over compressed word indices for an agent of `age` steps, consumed by
+        randZipf() in pick_vocab/study_vocab and by len() in the pct-knowledge calc.
+        """
+        from .zipf_generator.Zipf import Zipf_Mand_3S_CDF_comp, vocab_ceiling_curve
+        n_ages = self.max_life_steps
+        cdfs = np.empty((n_ages, self.vocab_red), dtype=np.float64)
+        for age in range(n_ages):
+            n = max(int(vocab_ceiling_curve(age, steps_per_year=self.steps_per_year)),
+                    self.vocab_red)
+            cdfs[age] = Zipf_Mand_3S_CDF_comp(n, n_red=self.vocab_red)
+        self.cdf_data = {'s': cdfs}
 
     def check_model_set_up(self):
         # check some key configs in model are correct
