@@ -94,7 +94,7 @@ class BaseAgent:
         self.lang_stats = defaultdict(dict)
 
         # define mask for each step
-        self.step_mask = {lang: np.zeros(self.model.vocab_red, dtype=np.bool)
+        self.step_mask = {lang: np.zeros(self.model.vocab_red, dtype=bool)
                           for lang in self.model.langs}
         if import_ic:
             self.set_lang_ics()
@@ -150,8 +150,8 @@ class BaseAgent:
                * S_0: float. Initial value of memory stability
                * t_0: integer. Initial value of time-elapsed (in days) from last time words were encountered
         """
-        self.lang_stats[lang]['S'] = np.full(self.model.vocab_red, S_0, dtype=np.float)
-        self.lang_stats[lang]['t'] = np.full(self.model.vocab_red, t_0, dtype=np.float)
+        self.lang_stats[lang]['S'] = np.full(self.model.vocab_red, S_0, dtype=float)
+        self.lang_stats[lang]['t'] = np.full(self.model.vocab_red, t_0, dtype=float)
         self.lang_stats[lang]['R'] = np.exp(- self.k *
                                             self.lang_stats[lang]['t'] /
                                             self.lang_stats[lang]['S']
@@ -754,7 +754,7 @@ class ListenerAgent(BaseAgent):
 
     def reset_step_mask(self, lang):
         # reset agent's step mask
-        self.step_mask[lang] = np.zeros(self.model.vocab_red, dtype=np.bool)
+        self.step_mask[lang] = np.zeros(self.model.vocab_red, dtype=bool)
 
     def register_to_school(self, max_num_studs_per_course=25):
         def reg_conds(school):
