@@ -1,29 +1,28 @@
 # bilangsim Tech-Stack Modernization Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Get the abandoned `bilangsim` agent-based model running cleanly on a modern Python stack with modern storage, without changing any model science.
 
-**Architecture:** Five sequential, independently-committable phases. Reach a *runnable model + green test suite on the OLD pinned stack* as early as possible (Phase 1) so every later change has a regression baseline. Drop Mesa (Phase 2), make data files unnecessary (Phase 3), modernize storage (Phase 4), and only then jump the interpreter/dependency versions (Phase 5) — so each phase changes exactly one risky variable.
+**Architecture:** Six sequential, independently-committable phases. **Revised 2026-05-14:** the original plan assumed the 2018 dependency stack could be installed and used as a frozen regression baseline through Phases 1–4, with the version jump deferred to last. That is not possible — the pinned 2018 packages (`numpy==1.15.0`, `Cython==0.28.5`, `tables==3.4.4`, `pandas==0.23.4`, `mesa==0.7.8.1`) have no wheels for Python ≥3.8 and will not build on a modern toolchain, and no environment with them exists. So the environment jump moves to the **front** (Phase 0), and all code work happens against the modern stack. The new sequencing: stand up the modern env → make the package import → make the model construct & run → green test suite + frozen baseline → warmup/constants cleanup → storage to Parquet → final verification.
 
-**Tech Stack:** Python 3.13, numpy 2.x, pandas 2.x, networkx 3.x, numba (latest compatible), pyarrow (Parquet), dill (snapshots), uv (dependency management). Mesa is removed entirely.
+**Tech Stack:** Python 3.13, numpy 2.x, pandas 2.x, networkx 3.x, numba (latest compatible), pyarrow (Parquet), dill (snapshots), tqdm, uv (dependency management). Mesa, deepdish, tables, pyprind are removed entirely.
 
 ---
 
 ## Context
 
-`bilangsim` simulates long-term language evolution in bilingual societies. It was started years ago, abandoned, and is now being revived. **It does not currently run at all** — `BiLangModel.__init__` calls `deepdish.io.load` on two HDF5 data files (`bilangsim/data/init_conds/lang_spoken_ics_vs_step.h5` and `bilangsim/data/cdfs/lang_cdfs_vs_step.h5`) that do not exist in the repo, raising `OSError` on construction. Because the test suite constructs a real model, the tests are dead too.
+`bilangsim` simulates long-term language evolution in bilingual societies. It was started years ago, abandoned, and is now being revived. **It does not currently run at all** — `BiLangModel.__init__` calls `deepdish.io.load` on two HDF5 data files (`bilangsim/data/init_conds/lang_spoken_ics_vs_step.h5` and `bilangsim/data/cdfs/lang_cdfs_vs_step.h5`) that do not exist in the repo. The test suite constructs a real model, so the tests are dead too. The stack is frozen at 2018 and `requirements.txt` contains a broken self-referencing `-e git+...#egg=bilangsim` line.
 
-On top of that, the stack is frozen at 2018 (`numpy==1.15.0`, `pandas==0.23.4`, `mesa==0.7.8.1`, `numba==0.40.0`, `tables==3.4.4`, `deepdish==0.3.6`) and `requirements.txt` contains a broken self-referencing `-e git+...#egg=bilangsim` line.
-
-Four decisions have been made by the project owner:
+Decisions made by the project owner that shaped this plan:
 1. **Drop Mesa entirely** — the project subclasses and fully overrides `Model`, `StagedActivation`, `MultiGrid`, and `DataCollector`, and its agents aren't even Mesa agents. Vendoring ~250 lines of owned code is lower-risk than chasing Mesa's fast-moving API.
 2. **Initial conditions: null ICs + warmup phase** — drop the ~520 MB IC file (its generation recipe isn't in the repo); seed all agents with the existing `_set_null_lang_attrs` and add a configurable warmup-steps phase.
 3. **CDFs: generate at runtime** — drop the CDF file; compute age-indexed Zipf-Mandelbrot CDFs at construction from the existing `zipf_generator/Zipf.py` math.
-4. **Results storage: Parquet, keep dill snapshots** — replace the pandas-HDFStore output with Parquet; keep `dill` for full-model snapshots (it isn't a stack-rot risk and the alternative is serializing the whole agent+network object graph).
-5. **Scope: stop at a clean run** — fix only bugs that block a clean run with passing tests. The documented model bugs (e.g. the L12 `pct` bug) and model improvements are deferred to a later plan.
+4. **Results storage: Parquet, keep dill snapshots** — replace the pandas-HDFStore output with Parquet; keep `dill` for full-model snapshots.
+5. **Scope: stop at a clean run** — fix only bugs that block a clean run with passing tests. Documented model bugs (e.g. the L12 `pct` bug) and model improvements are deferred to a later plan.
+6. **Environment via `uv`** — there is no bare `python` on PATH; use `uv python list`, `uv sync`, `uv run`. Python 3.13.12 is already installed locally.
 
-**Intended outcome:** `uv run pytest tests/` passes on Python 3.13, and `uv run python -c "from bilangsim import BiLangModel; BiLangModel(400, num_clusters=2).run_model(5)"` succeeds, with no Mesa / deepdish / tables / HDF5 dependency anywhere.
+**Intended outcome:** `uv run pytest tests/` passes on Python 3.13, and `uv run python -c "from bilangsim import BiLangModel; BiLangModel(400, num_clusters=2).run_model(5)"` succeeds, with no Mesa / deepdish / tables / pyprind / HDF5 dependency anywhere.
 
 **Working branch:** `development`. Commit after every task.
 
@@ -31,290 +30,108 @@ Four decisions have been made by the project owner:
 
 ## Critical files
 
-- `bilangsim/model.py` — `BiLangModel`; HDF5 loads, import-time crashes, needs `_build_cdfs`, warmup param.
+- `bilangsim/model.py` — `BiLangModel`; mesa/deepdish/pyprind imports, import-time crashes, HDF5 loads, needs `_build_cdfs`, warmup param.
 - `bilangsim/agent.py` — `np.bool`/`np.float` aliases, IC setup (`set_lang_ics`, `_set_lang_attrs`, `_set_null_lang_attrs`), 6 numba `@njit` helpers.
-- `bilangsim/schedule.py` — `StagedActivationModif`, currently subclasses `mesa.time.StagedActivation`.
+- `bilangsim/schedule.py` — `StagedActivationModif`, subclasses `mesa.time.StagedActivation`.
 - `bilangsim/dataprocess.py` — `DataProcessor` (subclasses `DataCollector`), all HDF5 output, `deepdish` reads, `matplotlib.pylab`.
+- `bilangsim/networks.py` — `sklearn` imports that may have moved in modern sklearn.
 - `bilangsim/zipf_generator/Zipf.py` — CDF math; needs a new `vocab_ceiling_curve`.
 - `bilangsim/space.py` — **new file**, vendored MultiGrid.
 - `pyproject.toml` — **new file**, replaces `setup.py` + `requirements.txt`.
-- `setup.py`, `MANIFEST.in` — reference the dropped `data/*.h5`; removed in Phases 3/5.
 
 ---
 
-## Phase 1 — Unblock: model constructs and tests run (OLD STACK)
+## Phase 0 — Modern environment
 
-**Milestone:** `BiLangModel(...)` constructs, `m.run_model(5)` runs, `pytest tests/` runs to completion. Mesa stays pinned at 0.7.8.1, no dependency versions change. Ends with a **frozen baseline** pass/fail set.
+**Milestone:** `uv sync --python 3.13` resolves cleanly; `setup.py` and `requirements.txt` are gone, replaced by `pyproject.toml`.
 
-### Task 1.1: Smoke test (write the failing test first)
+### Task 0.1: Create pyproject.toml, delete legacy packaging, sync
 
 **Files:**
-- Create: `tests/test_smoke.py`
+- Create: `pyproject.toml`
+- Delete: `setup.py`, `requirements.txt`, `MANIFEST.in`
 
-- [ ] **Step 1: Write the smoke test**
+- [ ] **Step 1: Write `pyproject.toml`**
 
-```python
-# tests/test_smoke.py
-import os
-os.environ.setdefault("PYTHONHASHSEED", "0")
+```toml
+[project]
+name = "bilangsim"
+version = "0.2.0"
+description = "Agent-based simulator of bilingual societies"
+authors = [{ name = "Paolo Gervasoni Vila", email = "pgervila@gmail.com" }]
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.0",
+    "scipy>=1.13",
+    "pandas>=2.2",
+    "numba>=0.60",
+    "scikit-learn>=1.5",
+    "matplotlib>=3.9",
+    "networkx>=3.3",
+    "pyarrow>=17.0",
+    "dill>=0.3.8",
+    "tqdm>=4.66",
+]
 
-from bilangsim import BiLangModel
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-repeat>=0.9",
+    "pytest-cov>=5.0",
+]
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-def test_model_constructs():
-    model = BiLangModel(200, num_clusters=1)
-    assert model.schedule.get_agent_count() > 0
-
-
-def test_model_runs_short():
-    model = BiLangModel(200, num_clusters=1)
-    model.run_model(3)
-    assert model.schedule.steps == 3
+[tool.hatch.build.targets.wheel]
+packages = ["bilangsim"]
 ```
 
-- [ ] **Step 2: Run it to confirm it fails**
+Delete `setup.py`, `requirements.txt` (removes the broken `-e git+...` line), and `MANIFEST.in` (it only referenced the dropped `data/*.h5` files).
 
-Run: `PYTHONHASHSEED=0 pytest tests/test_smoke.py -v`
-Expected: FAIL — `OSError` from `dd.io.load` (missing HDF5 files) during construction, or `KeyError: 'PYTHONHASHSEED'` at import.
+- [ ] **Step 2: Sync the environment**
+
+Run: `uv sync --python 3.13`
+Expected: a `.venv` is created and all dependencies resolve. If `numba` cannot resolve against the newest `numpy`, cap numpy to numba's supported range (e.g. `"numpy>=2.0,<2.3"`) and re-run — record the chosen pin in a comment in `pyproject.toml`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add tests/test_smoke.py
-git commit -m "test: add smoke test for model construction and short run"
+git add pyproject.toml
+git rm setup.py requirements.txt MANIFEST.in
+git commit -m "build: migrate to uv + pyproject.toml on Python 3.13, drop legacy packaging"
 ```
 
-### Task 1.2: Fix import-time crash in model.py
+**Phase 0 verification:** `uv run python --version` reports 3.13.x; `uv pip list` shows the modern stack with no mesa/deepdish/tables/pyprind.
+
+---
+
+## Phase 1 — Make the package import cleanly
+
+**Milestone:** `uv run python -c "import bilangsim"` succeeds; `grep -rn 'mesa\|pyprind' bilangsim/` is empty. (Construction will still fail — that is Phase 2.)
+
+### Task 1.1: Fix import-time crash in model.py
 
 **Files:**
 - Modify: `bilangsim/model.py:3`, `bilangsim/model.py:39`
 
 - [ ] **Step 1: Remove the dead `__future__` import and fix the `PYTHONHASHSEED` access**
 
-In `bilangsim/model.py`, delete line 3 (`from __future__ import division`).
-
-Change line 39 from:
-
-```python
-print('python hash seed is', os.environ['PYTHONHASHSEED'])
-```
-
-to:
+In `bilangsim/model.py`, delete line 3 (`from __future__ import division`). Change line 39 from `print('python hash seed is', os.environ['PYTHONHASHSEED'])` to:
 
 ```python
 print('python hash seed is', os.environ.get('PYTHONHASHSEED', 'not set'))
 ```
 
-- [ ] **Step 2: Verify the module imports**
-
-Run: `python -c "import bilangsim.model"`
-Expected: import succeeds (it will still fail later at construction, that's fine).
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 2: Commit**
 
 ```bash
 git add bilangsim/model.py
 git commit -m "fix: guard PYTHONHASHSEED access and drop dead __future__ import"
 ```
 
-### Task 1.3: Replace deprecated numpy dtype aliases
-
-**Files:**
-- Modify: `bilangsim/agent.py` (and any other file the grep finds)
-
-- [ ] **Step 1: Find every deprecated alias**
-
-Run: `grep -rn 'np\.bool\b\|np\.float\b\|np\.int\b\|np\.object\b' bilangsim/`
-Expected: matches in `agent.py` (at least `dtype=np.bool` around line 97, `dtype=np.float` around lines 153–154, and `reset_step_mask` around line 757).
-
-- [ ] **Step 2: Replace each with the Python builtin**
-
-For every match, replace `np.bool` → `bool`, `np.float` → `float`, `np.int` → `int`, `np.object` → `object`. These builtins work identically on numpy 1.15 **and** numpy 2.x, so this is safe on the old stack and removes a Phase 5 blocker.
-
-- [ ] **Step 3: Verify no aliases remain**
-
-Run: `grep -rn 'np\.bool\b\|np\.float\b\|np\.int\b\|np\.object\b' bilangsim/`
-Expected: no output.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add bilangsim/agent.py
-git commit -m "fix: replace removed numpy dtype aliases with builtins"
-```
-
-### Task 1.4: Add the age→vocab-ceiling curve
-
-**Files:**
-- Modify: `bilangsim/zipf_generator/Zipf.py`
-- Modify: `bilangsim/zipf_generator/__init__.py`
-
-- [ ] **Step 1: Add `vocab_ceiling_curve` to `Zipf.py`**
-
-Append to `bilangsim/zipf_generator/Zipf.py` (this replaces the `# IDEA` comment's open question at line 70 with a concrete curve):
-
-```python
-def vocab_ceiling_curve(age_steps, steps_per_year=36, n_min=500, n_max=10000,
-                        midpoint_years=8, rate=0.4):
-    """Age-dependent ceiling on the raw vocabulary size an agent can sample from.
-
-    Logistic growth in years: from n_min in early childhood to n_max in adulthood.
-    Replaces the legacy externally-precomputed age->vocab mapping. Returns an int
-    (or int array) suitable as the `n` argument to the Zipf CDF generators.
-    """
-    age_years = np.asarray(age_steps) / steps_per_year
-    n = n_min + (n_max - n_min) / (1 + np.exp(-rate * (age_years - midpoint_years)))
-    return np.rint(n).astype(np.int64)
-```
-
-- [ ] **Step 2: Export it**
-
-In `bilangsim/zipf_generator/__init__.py`, add `vocab_ceiling_curve` and `Zipf_Mand_3S_CDF_comp` to the imports:
-
-```python
-from .Zipf import Zipf_CDF, Zipf_Mandelbrot_CDF, randZipf
-from .Zipf import Zipf_CDF_compressed, Zipf_Mand_CDF_compressed
-from .Zipf import Zipf_Mand_3S_CDF_comp, vocab_ceiling_curve
-```
-
-- [ ] **Step 3: Smoke-check the curve**
-
-Run: `python -c "from bilangsim.zipf_generator import vocab_ceiling_curve as v; print(v(0), v(8*36), v(3599))"`
-Expected: three increasing integers, the first ≈ 500, the last close to 10000.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add bilangsim/zipf_generator/Zipf.py bilangsim/zipf_generator/__init__.py
-git commit -m "feat: add age-dependent vocab-ceiling curve for runtime CDF generation"
-```
-
-### Task 1.5: Generate CDFs at runtime, remove the CDF HDF5 load
-
-**Files:**
-- Modify: `bilangsim/model.py` (imports near line 15, `__init__` near lines 113–115)
-
-- [ ] **Step 1: Add `_build_cdfs` and call it from `__init__`**
-
-In `bilangsim/model.py`, remove `import deepdish as dd` (line 15). Remove the two `dd.io.load` lines (114–115). In their place in `__init__`, call a new method, and define it on `BiLangModel`:
-
-```python
-# in __init__, where lines 114-115 used to be:
-        self._build_cdfs()
-        self.lang_ICs = None  # legacy IC file dropped; agents use null ICs (see set_lang_ics)
-```
-
-```python
-    def _build_cdfs(self):
-        """Build age-indexed Zipf-Mandelbrot CDFs at construction time.
-
-        Replaces the legacy lang_cdfs_vs_step.h5 file. cdf_data['s'][age] is the
-        CDF over compressed word indices for an agent of `age` steps, consumed by
-        randZipf() in pick_vocab/study_vocab and by len() in the pct-knowledge calc.
-        """
-        from .zipf_generator.Zipf import Zipf_Mand_3S_CDF_comp, vocab_ceiling_curve
-        n_ages = self.max_life_steps
-        cdfs = np.empty((n_ages, self.vocab_red), dtype=np.float64)
-        for age in range(n_ages):
-            n = max(int(vocab_ceiling_curve(age, steps_per_year=self.steps_per_year)),
-                    self.vocab_red)
-            cdfs[age] = Zipf_Mand_3S_CDF_comp(n, n_red=self.vocab_red)
-        self.cdf_data = {'s': cdfs}
-```
-
-Note: `max_life_steps` is currently a `BaseAgent` class attribute (`agent.py:78`, value 3600). Reference it on `BiLangModel` — add `max_life_steps = 3600` as a `BiLangModel` class attribute next to `max_lifetime` so `_build_cdfs` can use `self.max_life_steps`. (Phase 3 reconciles the 3600/4000 split.)
-
-- [ ] **Step 2: Verify CDF generation in isolation**
-
-Run: `python -c "from bilangsim.model import BiLangModel" ` then construct is still blocked by ICs — instead verify the method logic:
-`python -c "import numpy as np; from bilangsim.zipf_generator.Zipf import Zipf_Mand_3S_CDF_comp as f; c=f(2000,n_red=500); print(c.shape, c.min()>=0, c.max()<=1.0+1e-9, np.all(np.diff(c)>=-1e-12))"`
-Expected: `(500,) True True True` — shape correct, values in [0,1], monotonic non-decreasing.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add bilangsim/model.py
-git commit -m "feat: generate age-indexed Zipf CDFs at runtime, drop CDF HDF5 load"
-```
-
-### Task 1.6: Route all initial conditions through null ICs
-
-**Files:**
-- Modify: `bilangsim/agent.py` — `set_lang_ics` (~170), `_set_lang_attrs` (~114)
-
-- [ ] **Step 1: Make `set_lang_ics` not depend on `lang_ICs`**
-
-The legacy `_set_lang_attrs` reads `self.model.lang_ICs[pct_key][...]`, which no longer exists. Rewrite `set_lang_ics` so every store is initialized via `_set_null_lang_attrs` (which is already self-contained). Replace the body of `set_lang_ics` (`agent.py:170-198`) with:
-
-```python
-    def set_lang_ics(self, s_0=0.01, t_0=1000, biling_key=None):
-        """ Set agent's linguistic Initial Conditions.
-
-        The legacy per-age IC file (lang_spoken_ics_vs_step.h5) has been dropped.
-        All agents start from null linguistic knowledge; a realistic demography is
-        produced by the model's warmup phase instead (see BiLangModel warmup_steps).
-        `biling_key` is accepted for call-site compatibility but is currently a
-        no-op — reintroducing graded initial bilingualism is deferred to the
-        model-improvement plan.
-        """
-        for lang in ('L1', 'L2', 'L12', 'L21'):
-            self._set_null_lang_attrs(lang, s_0, t_0)
-        # set weights to model reaction to linguistic exclusion
-        self.set_excl_weights()
-```
-
-- [ ] **Step 2: Delete the now-dead `_set_lang_attrs`**
-
-Remove the `_set_lang_attrs` method entirely (`agent.py:114-143`) — nothing calls it anymore (verify: `grep -rn '_set_lang_attrs' bilangsim/` returns no call sites). Leave `_set_null_lang_attrs` untouched.
-
-- [ ] **Step 3: Verify the IC call sites still pass**
-
-`set_lang_ics` is called from `model.py:set_lang_ics_in_family` with `biling_key=...` keyword args — confirm those calls still work (the kwarg is accepted, just ignored).
-Run: `grep -rn 'set_lang_ics' bilangsim/`
-Expected: call sites in `agent.py` (`import_ic` path) and `model.py` all pass `biling_key` as a keyword or no args — all still valid signatures.
-
-- [ ] **Step 4: Run the smoke test**
-
-Run: `PYTHONHASHSEED=0 pytest tests/test_smoke.py -v`
-Expected: PASS — model constructs and runs 3 steps.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add bilangsim/agent.py
-git commit -m "feat: seed all agents with null ICs, drop legacy IC-file dependency"
-```
-
-### Task 1.7: Run the full suite and freeze the baseline
-
-**Files:**
-- Create: `docs/superpowers/plans/phase1-baseline.txt`
-
-- [ ] **Step 1: Run the full test suite**
-
-Run: `PYTHONHASHSEED=0 pytest tests/ -v --tb=short | tee docs/superpowers/plans/phase1-baseline.txt`
-Expected: the suite runs to completion (no collection errors). Some individual tests may fail.
-
-- [ ] **Step 2: Triage every failure**
-
-For each failing test: if it fails due to a **documented deferred model bug** (cross-check `docs/legacy_language_model_analysis.md`, e.g. anything touching the L12 `pct` update), record it in the baseline file as ACCEPTED. If it fails for any other reason (a porting mistake from Tasks 1.2–1.6), **fix it now** and re-run. Do not proceed to Phase 2 with unexplained failures.
-
-- [ ] **Step 3: Commit the frozen baseline**
-
-```bash
-git add docs/superpowers/plans/phase1-baseline.txt
-git commit -m "test: freeze Phase 1 test baseline (pass/fail set on old stack)"
-```
-
-**Phase 1 verification:** `tests/test_smoke.py` passes; `pytest tests/` runs to completion; the pass/fail set is recorded in `phase1-baseline.txt`. This set is the regression baseline for Phases 2–4.
-
----
-
-## Phase 2 — Drop Mesa, vendor minimal replacements (OLD STACK)
-
-**Milestone:** `grep -rn 'mesa' bilangsim/` returns nothing; dependency versions otherwise unchanged; the Phase 1 baseline pass/fail set is unchanged.
-
-### Task 2.1: Vendor a minimal MultiGrid
+### Task 1.2: Vendor a minimal MultiGrid
 
 **Files:**
 - Create: `bilangsim/space.py`
@@ -349,7 +166,7 @@ def test_place_move_remove_and_contents():
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest tests/test_space.py -v`
+Run: `uv run pytest tests/test_space.py -v`
 Expected: FAIL — `ModuleNotFoundError: bilangsim.space`.
 
 - [ ] **Step 3: Write `bilangsim/space.py`**
@@ -410,7 +227,7 @@ class MultiGrid:
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `pytest tests/test_space.py -v`
+Run: `uv run pytest tests/test_space.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -420,7 +237,7 @@ git add bilangsim/space.py tests/test_space.py
 git commit -m "feat: vendor minimal MultiGrid to replace mesa.space"
 ```
 
-### Task 2.2: Make the scheduler standalone
+### Task 1.3: Make the scheduler standalone
 
 **Files:**
 - Modify: `bilangsim/schedule.py`
@@ -477,14 +294,14 @@ git add bilangsim/schedule.py
 git commit -m "refactor: make StagedActivationModif standalone, drop mesa.time"
 ```
 
-### Task 2.3: Make DataProcessor standalone
+### Task 1.4: Make DataProcessor standalone
 
 **Files:**
-- Modify: `bilangsim/dataprocess.py:10`, `bilangsim/dataprocess.py:15-40`
+- Modify: `bilangsim/dataprocess.py:5`, `bilangsim/dataprocess.py:10`, `bilangsim/dataprocess.py:15-40`
 
-- [ ] **Step 1: Remove the DataCollector import and inline its `__init__` storage logic**
+- [ ] **Step 1: Fix imports and inline the DataCollector storage logic**
 
-In `bilangsim/dataprocess.py`, delete line 10 (`from mesa.datacollection import DataCollector`). Change the class declaration on line 15 from `class DataProcessor(DataCollector):` to `class DataProcessor:`.
+In `bilangsim/dataprocess.py`: change `import matplotlib.pylab as plt` (line 5) to `import matplotlib.pyplot as plt`. Delete line 10 (`from mesa.datacollection import DataCollector`). Change the class declaration on line 15 from `class DataProcessor(DataCollector):` to `class DataProcessor:`.
 
 Replace the `super().__init__(model_reporters={...}, agent_reporters={...})` call (lines 19–40) with direct attribute assignment — keep the **exact same reporter dicts**, just bind them and initialize the storage dicts:
 
@@ -514,7 +331,7 @@ Replace the `super().__init__(model_reporters={...}, agent_reporters={...})` cal
         self.agent_vars = {k: [] for k in self.agent_reporters}
 ```
 
-(`collect`, `get_model_vars_dataframe`, `get_agent_vars_dataframe` already override the Mesa versions — leave them.)
+(`collect`, `get_model_vars_dataframe`, `get_agent_vars_dataframe` already override the Mesa versions — leave them. The `import deepdish as dd` line stays for now; it is removed in Phase 5 when its remaining uses are ported.)
 
 - [ ] **Step 2: Verify**
 
@@ -528,68 +345,325 @@ git add bilangsim/dataprocess.py
 git commit -m "refactor: make DataProcessor standalone, drop mesa.datacollection"
 ```
 
-### Task 2.4: Drop Mesa from the model and verify the whole package
+### Task 1.5: Drop mesa/pyprind from model.py, fix matplotlib, make package import
 
 **Files:**
-- Modify: `bilangsim/model.py:18-19`
+- Modify: `bilangsim/model.py` (imports lines 12–19, `run_model` ~714–741), and any import-blocker the verification surfaces (e.g. `bilangsim/networks.py` sklearn imports)
 
-- [ ] **Step 1: Remove the Mesa imports and base class**
+- [ ] **Step 1: Fix model.py imports and the progress bar**
 
-In `bilangsim/model.py`, delete lines 18–19 (`from mesa import Model` / `from mesa.space import MultiGrid`). Add `from .space import MultiGrid` near the other local imports (next to `from .schedule import StagedActivationModif`). Change `class BiLangModel(Model):` to `class BiLangModel:`.
+In `bilangsim/model.py`:
+- Line 12: change `import matplotlib.pylab as plt` → `import matplotlib.pyplot as plt`.
+- Line 14: delete `import pyprind`; add `from tqdm import tqdm` near the other imports.
+- Lines 18–19: delete `from mesa import Model` and `from mesa.space import MultiGrid`; add `from .space import MultiGrid` next to `from .schedule import StagedActivationModif`.
+- Change `class BiLangModel(Model):` to `class BiLangModel:`.
+- In `run_model`, replace the `pyprind` progress bar: delete the `pbar = pyprind.ProgBar(steps)` line and the `pbar.update()` line, and change the loop `for _ in range(steps):` to `for _ in tqdm(range(steps)):`.
 
 - [ ] **Step 2: Confirm nothing relied on the Mesa `Model` base**
 
 Run: `grep -n 'super(\|self\.running\|self\._seed' bilangsim/model.py`
-Expected: no output. If `self.running` *is* found, add `self.running = True` in `__init__`. If `super()` is found, resolve it (the `__init__` should not call it).
+Expected: no output. If `self.running` *is* found, add `self.running = True` in `__init__`.
 
-- [ ] **Step 3: Verify Mesa is fully gone**
+- [ ] **Step 3: Make the package import**
 
-Run: `grep -rn 'mesa' bilangsim/`
+Run: `uv run python -c "import bilangsim"`
+Expected: succeeds. If it fails on an unrelated import (most likely `bilangsim/networks.py` doing `from sklearn.utils import DataConversionWarning` — in modern sklearn this is `from sklearn.exceptions import DataConversionWarning`), fix that import at its site and re-run until the package imports cleanly.
+
+- [ ] **Step 4: Verify mesa and pyprind are gone**
+
+Run: `grep -rn 'mesa\|pyprind' bilangsim/`
 Expected: no output.
-
-- [ ] **Step 4: Run the full suite against the frozen baseline**
-
-Run: `PYTHONHASHSEED=0 pytest tests/ -v --tb=short`
-Expected: the pass/fail set matches `docs/superpowers/plans/phase1-baseline.txt` exactly, **plus** `tests/test_space.py` passing. Any *newly* failing test is a porting regression — fix it before committing.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bilangsim/model.py
-git commit -m "refactor: drop mesa.Model base class, use vendored MultiGrid"
+git add bilangsim/
+git commit -m "refactor: drop mesa and pyprind from model, package now imports on modern stack"
 ```
 
-**Phase 2 verification:** `grep -rn 'mesa' bilangsim/` is empty; `pip uninstall mesa` then `pytest tests/` still matches the baseline.
+**Phase 1 verification:** `uv run python -c "import bilangsim"` succeeds; `grep -rn 'mesa\|pyprind' bilangsim/` is empty; `uv run pytest tests/test_space.py` passes.
 
 ---
 
-## Phase 3 — Warmup phase + constant reconciliation + manifest cleanup (OLD STACK)
+## Phase 2 — Make the model construct and run
 
-**Milestone:** the model can be run with a configurable warmup; the 3600/4000 age-array inconsistency is resolved; dropped data files are no longer referenced anywhere.
+**Milestone:** `tests/test_smoke.py` passes — `BiLangModel(...)` constructs and `run_model(3)` runs.
 
-### Task 3.1: Reconcile `max_life_steps` (3600) vs `max_lifetime` (4000)
+### Task 2.1: Add the smoke test (the failing test)
 
 **Files:**
-- Modify: `bilangsim/model.py` (class attrs ~line 71), `bilangsim/agent.py:78`
+- Create: `tests/test_smoke.py` (already drafted in the working tree)
+
+- [ ] **Step 1: Confirm the smoke test content**
+
+```python
+# tests/test_smoke.py
+import os
+os.environ.setdefault("PYTHONHASHSEED", "0")
+
+from bilangsim import BiLangModel
+
+
+def test_model_constructs():
+    model = BiLangModel(200, num_clusters=1)
+    assert model.schedule.get_agent_count() > 0
+
+
+def test_model_runs_short():
+    model = BiLangModel(200, num_clusters=1)
+    model.run_model(3)
+    assert model.schedule.steps == 3
+```
+
+- [ ] **Step 2: Run it to confirm it fails**
+
+Run: `uv run pytest tests/test_smoke.py -v`
+Expected: FAIL — `OSError` from the `dd.io.load` calls (missing HDF5 files) during construction, or an `AttributeError` from `np.bool`/`np.float`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/test_smoke.py
+git commit -m "test: add smoke test for model construction and short run"
+```
+
+### Task 2.2: Replace deprecated numpy dtype aliases
+
+**Files:**
+- Modify: `bilangsim/agent.py` (and any other file the grep finds)
+
+- [ ] **Step 1: Find every deprecated alias**
+
+Run: `grep -rn 'np\.bool\b\|np\.float\b\|np\.int\b\|np\.object\b' bilangsim/`
+Expected: matches in `agent.py` (at least `dtype=np.bool` ~line 97, `dtype=np.float` ~lines 153–154, and `reset_step_mask` ~line 757).
+
+- [ ] **Step 2: Replace each with the Python builtin**
+
+For every match, replace `np.bool` → `bool`, `np.float` → `float`, `np.int` → `int`, `np.object` → `object`. These aliases were removed in numpy 2.0; the builtins are the correct replacement.
+
+- [ ] **Step 3: Verify no aliases remain**
+
+Run: `grep -rn 'np\.bool\b\|np\.float\b\|np\.int\b\|np\.object\b' bilangsim/`
+Expected: no output.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add bilangsim/agent.py
+git commit -m "fix: replace removed numpy dtype aliases with builtins"
+```
+
+### Task 2.3: Add the age→vocab-ceiling curve
+
+**Files:**
+- Modify: `bilangsim/zipf_generator/Zipf.py`, `bilangsim/zipf_generator/__init__.py`
+
+- [ ] **Step 1: Add `vocab_ceiling_curve` to `Zipf.py`**
+
+Append to `bilangsim/zipf_generator/Zipf.py`:
+
+```python
+def vocab_ceiling_curve(age_steps, steps_per_year=36, n_min=500, n_max=10000,
+                        midpoint_years=8, rate=0.4):
+    """Age-dependent ceiling on the raw vocabulary size an agent can sample from.
+
+    Logistic growth in years: from n_min in early childhood to n_max in adulthood.
+    Replaces the legacy externally-precomputed age->vocab mapping. Returns an int
+    (or int array) suitable as the `n` argument to the Zipf CDF generators.
+    """
+    age_years = np.asarray(age_steps) / steps_per_year
+    n = n_min + (n_max - n_min) / (1 + np.exp(-rate * (age_years - midpoint_years)))
+    return np.rint(n).astype(np.int64)
+```
+
+- [ ] **Step 2: Export it**
+
+In `bilangsim/zipf_generator/__init__.py`, update to:
+
+```python
+from .Zipf import Zipf_CDF, Zipf_Mandelbrot_CDF, randZipf
+from .Zipf import Zipf_CDF_compressed, Zipf_Mand_CDF_compressed
+from .Zipf import Zipf_Mand_3S_CDF_comp, vocab_ceiling_curve
+```
+
+- [ ] **Step 3: Smoke-check the curve**
+
+Run: `uv run python -c "from bilangsim.zipf_generator import vocab_ceiling_curve as v; print(v(0), v(8*36), v(3599))"`
+Expected: three increasing integers, the first ≈ 500, the last close to 10000.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add bilangsim/zipf_generator/Zipf.py bilangsim/zipf_generator/__init__.py
+git commit -m "feat: add age-dependent vocab-ceiling curve for runtime CDF generation"
+```
+
+### Task 2.4: Generate CDFs at runtime, remove the CDF HDF5 load
+
+**Files:**
+- Modify: `bilangsim/model.py` (imports near line 15, `__init__` near lines 113–115, add `_build_cdfs` and `max_life_steps` class attr)
+
+- [ ] **Step 1: Add `_build_cdfs` and call it from `__init__`**
+
+In `bilangsim/model.py`, remove `import deepdish as dd` (line 15). Remove the two `dd.io.load` lines (114–115). In their place in `__init__`:
+
+```python
+        self._build_cdfs()
+        self.lang_ICs = None  # legacy IC file dropped; agents use null ICs (see set_lang_ics)
+```
+
+Add `max_life_steps = 3600` as a `BiLangModel` class attribute next to `max_lifetime` (Phase 4 reconciles the 3600/4000 split). Define the method on `BiLangModel`:
+
+```python
+    def _build_cdfs(self):
+        """Build age-indexed Zipf-Mandelbrot CDFs at construction time.
+
+        Replaces the legacy lang_cdfs_vs_step.h5 file. cdf_data['s'][age] is the
+        CDF over compressed word indices for an agent of `age` steps, consumed by
+        randZipf() in pick_vocab/study_vocab and by len() in the pct-knowledge calc.
+        """
+        from .zipf_generator.Zipf import Zipf_Mand_3S_CDF_comp, vocab_ceiling_curve
+        n_ages = self.max_life_steps
+        cdfs = np.empty((n_ages, self.vocab_red), dtype=np.float64)
+        for age in range(n_ages):
+            n = max(int(vocab_ceiling_curve(age, steps_per_year=self.steps_per_year)),
+                    self.vocab_red)
+            cdfs[age] = Zipf_Mand_3S_CDF_comp(n, n_red=self.vocab_red)
+        self.cdf_data = {'s': cdfs}
+```
+
+- [ ] **Step 2: Verify CDF math in isolation**
+
+Run: `uv run python -c "import numpy as np; from bilangsim.zipf_generator.Zipf import Zipf_Mand_3S_CDF_comp as f; c=f(2000,n_red=500); print(c.shape, c.min()>=0, c.max()<=1.0+1e-9, np.all(np.diff(c)>=-1e-12))"`
+Expected: `(500,) True True True`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add bilangsim/model.py
+git commit -m "feat: generate age-indexed Zipf CDFs at runtime, drop CDF HDF5 load"
+```
+
+### Task 2.5: Route all initial conditions through null ICs, get the model running
+
+**Files:**
+- Modify: `bilangsim/agent.py` — `set_lang_ics` (~170), `_set_lang_attrs` (~114), plus any construction-blocking breakage surfaced
+
+- [ ] **Step 1: Make `set_lang_ics` not depend on `lang_ICs`**
+
+Replace the body of `set_lang_ics` (`agent.py:170-198`) with:
+
+```python
+    def set_lang_ics(self, s_0=0.01, t_0=1000, biling_key=None):
+        """ Set agent's linguistic Initial Conditions.
+
+        The legacy per-age IC file (lang_spoken_ics_vs_step.h5) has been dropped.
+        All agents start from null linguistic knowledge; a realistic demography is
+        produced by the model's warmup phase instead (see BiLangModel warmup_steps).
+        `biling_key` is accepted for call-site compatibility but is currently a
+        no-op — reintroducing graded initial bilingualism is deferred to the
+        model-improvement plan.
+        """
+        for lang in ('L1', 'L2', 'L12', 'L21'):
+            self._set_null_lang_attrs(lang, s_0, t_0)
+        # set weights to model reaction to linguistic exclusion
+        self.set_excl_weights()
+```
+
+- [ ] **Step 2: Delete the now-dead `_set_lang_attrs`**
+
+Remove `_set_lang_attrs` entirely (`agent.py:114-143`). Verify nothing calls it: `grep -rn '_set_lang_attrs' bilangsim/` → no call sites. Leave `_set_null_lang_attrs` untouched.
+
+- [ ] **Step 3: Run the smoke test, fix construction-blocking breakage**
+
+Run: `uv run pytest tests/test_smoke.py -v`
+Expected: PASS. If construction or the short run fails on a numpy 2.x / pandas 2.x / numba / networkx 3.x incompatibility, fix it at its call site and re-run until both smoke tests pass. Likely culprits: `np.NaN`→`np.nan`, `np.in1d`→`np.isin`, numba `@njit` compile errors in the 6 helpers, networkx 2→3 graph API in `networks.py`.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add bilangsim/
+git commit -m "feat: seed all agents with null ICs; model constructs and runs on modern stack"
+```
+
+**Phase 2 verification:** `uv run pytest tests/test_smoke.py -v` passes; `uv run python -c "from bilangsim import BiLangModel; BiLangModel(200, num_clusters=1).run_model(3)"` succeeds.
+
+---
+
+## Phase 3 — Full test suite green + frozen baseline
+
+**Milestone:** `uv run pytest tests/` runs to completion; every failure is either fixed or recorded as an ACCEPTED deferred-model-bug; the pass/fail set is committed as the regression baseline for Phases 4–6.
+
+### Task 3.1: Run the full suite and fix stack-migration breakage
+
+**Files:**
+- Modify: `bilangsim/agent.py`, `bilangsim/networks.py`, `bilangsim/dataprocess.py`, `bilangsim/city_objects.py`, `bilangsim/geomapping.py`, and any site the test run flags
+
+- [ ] **Step 1: Run the full suite**
+
+Run: `PYTHONHASHSEED=0 uv run pytest tests/ -v --tb=short`
+Expected: the suite runs to completion. Catalogue every failure.
+
+- [ ] **Step 2: Fix every stack-migration failure**
+
+Triage each failure. **Stack-migration breakage** (numpy 2.x: `np.NaN`, `np.in1d`, copy-semantics, scalar-conversion errors; pandas 2.x: `DataFrame.append` removal, `groupby` `level=` changes, `from_dict` dtype shifts; networkx 3.x: graph/adjacency API renames in `networks.py`, especially `compute_adj_matrices`; numba: `@njit` compile errors) → **fix it now** at the call site. `grep -rn 'np\.NaN\|\.append(' bilangsim/` is a useful starting sweep (list `.append` is fine; only DataFrame/Series `.append` was removed).
+
+- [ ] **Step 3: Commit the fixes**
+
+```bash
+git add bilangsim/
+git commit -m "fix: port numpy/pandas/networkx/numba call sites to the modern stack"
+```
+
+### Task 3.2: Triage remaining failures and freeze the baseline
+
+**Files:**
+- Create: `docs/superpowers/plans/phase3-baseline.txt`
+
+- [ ] **Step 1: Re-run the full suite and capture it**
+
+Run: `PYTHONHASHSEED=0 uv run pytest tests/ -v --tb=short | tee docs/superpowers/plans/phase3-baseline.txt`
+
+- [ ] **Step 2: Triage every remaining failure**
+
+For each still-failing test: if it fails due to a **documented deferred model bug** (cross-check `docs/legacy_language_model_analysis.md`, e.g. anything touching the L12 `pct` update), annotate it ACCEPTED in the baseline file with a one-line reason. If it fails for any other reason, **fix it now** and re-run. Do not finish the phase with unexplained failures.
+
+- [ ] **Step 3: Commit the frozen baseline**
+
+```bash
+git add docs/superpowers/plans/phase3-baseline.txt
+git commit -m "test: freeze Phase 3 test baseline on the modern stack"
+```
+
+**Phase 3 verification:** `pytest tests/` runs to completion; `phase3-baseline.txt` records the pass/fail set; every failure is fixed or ACCEPTED. This set is the regression baseline for Phases 4–6.
+
+---
+
+## Phase 4 — Warmup phase + constant reconciliation
+
+**Milestone:** the model can be run with a configurable warmup; the 3600/4000 age-array inconsistency is resolved; the Phase 3 baseline still holds.
+
+### Task 4.1: Reconcile `max_life_steps` (3600) vs `max_lifetime` (4000)
+
+**Files:**
+- Modify: `bilangsim/model.py` (class attrs ~line 71), `bilangsim/agent.py:290`
 
 - [ ] **Step 1: Unify on a single constant**
 
-Per-age arrays (`pct`, `excl_c`, the CDF rows) are length `max_life_steps = 3600`, but `set_conv_length_age_factor`/`set_death_prob_curve` build length-`max_lifetime = 4000` arrays. An agent older than 3600 steps would `IndexError` on the per-age arrays. Standardize on **3600**: in `bilangsim/model.py`, set `max_lifetime = 3600` (keep the name, change the value) and add `max_life_steps = 3600` as a class attribute (added in Task 1.5 — confirm it's there). In `bilangsim/agent.py`, leave `BaseAgent.max_life_steps = 3600` as-is.
+Per-age arrays (`pct`, `excl_c`, the CDF rows) are length `max_life_steps = 3600`, but `set_conv_length_age_factor`/`set_death_prob_curve` build length-`max_lifetime = 4000` arrays. An agent older than 3600 steps would `IndexError` on the per-age arrays. In `bilangsim/model.py`, set `max_lifetime = 3600` (keep the name, change the value); confirm `max_life_steps = 3600` is present (added in Task 2.4). Leave `BaseAgent.max_life_steps = 3600` as-is.
 
 - [ ] **Step 2: Add a guard in `grow`**
 
-In `BaseAgent.grow` (`agent.py:290`), clamp age so it can never index past the arrays:
+Replace `BaseAgent.grow` (`agent.py:290`) with:
 
 ```python
     def grow(self, growth_inc=1):
         self.info['age'] = min(self.info['age'] + growth_inc, self.max_life_steps - 1)
 ```
 
-(At 3600 steps = 100 years the death-probability curve makes survival astronomically unlikely; this is a belt-and-suspenders guard against an off-by-one, not a behavior change.)
-
 - [ ] **Step 3: Verify**
 
-Run: `PYTHONHASHSEED=0 pytest tests/ --tb=short`
+Run: `PYTHONHASHSEED=0 uv run pytest tests/ --tb=short`
 Expected: baseline unchanged.
 
 - [ ] **Step 4: Commit**
@@ -599,10 +673,10 @@ git add bilangsim/model.py bilangsim/agent.py
 git commit -m "fix: unify age-array length on 3600 steps, guard age in grow()"
 ```
 
-### Task 3.2: Add a configurable warmup phase
+### Task 4.2: Add a configurable warmup phase
 
 **Files:**
-- Modify: `bilangsim/model.py` — `__init__` signature, `run_model` (~714)
+- Modify: `bilangsim/model.py` — `__init__` signature and tail
 - Test: `tests/test_smoke.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -620,12 +694,12 @@ def test_warmup_runs_before_collection():
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `PYTHONHASHSEED=0 pytest tests/test_smoke.py::test_warmup_runs_before_collection -v`
+Run: `PYTHONHASHSEED=0 uv run pytest tests/test_smoke.py::test_warmup_runs_before_collection -v`
 Expected: FAIL — `BiLangModel` has no `warmup_steps` parameter.
 
 - [ ] **Step 3: Implement warmup**
 
-Add `warmup_steps=0` to the `BiLangModel.__init__` signature and store `self.warmup_steps = warmup_steps`. At the very end of `__init__` (after `self.init_mode = False`, before the optional `check_model_set_up`), run the warmup without collecting data:
+Add `warmup_steps=0` to the `BiLangModel.__init__` signature and store `self.warmup_steps = warmup_steps`. At the very end of `__init__` (after `self.init_mode = False`, before the optional `check_model_set_up`):
 
 ```python
         # warmup phase: advance the simulation so a realistic demography emerges
@@ -634,11 +708,11 @@ Add `warmup_steps=0` to the `BiLangModel.__init__` signature and store `self.war
             self.schedule.step()
 ```
 
-In `run_model` (`model.py:714`), no change is needed — `step()` already calls `data_process.collect()`, and warmup uses `schedule.step()` directly (bypassing collection). Confirm `data_process.collect()` is only invoked from `BiLangModel.step` and not from `schedule.step`.
+Confirm `data_process.collect()` is only invoked from `BiLangModel.step` and not from `schedule.step` — so warmup advances the schedule without collecting.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `PYTHONHASHSEED=0 pytest tests/test_smoke.py -v`
+Run: `PYTHONHASHSEED=0 uv run pytest tests/test_smoke.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -648,34 +722,18 @@ git add bilangsim/model.py tests/test_smoke.py
 git commit -m "feat: add configurable warmup phase before data collection"
 ```
 
-### Task 3.3: Remove dropped-file references from packaging metadata
-
-**Files:**
-- Modify: `MANIFEST.in`, `setup.py`
-
-- [ ] **Step 1: Strip the `data/*.h5` references**
-
-In `MANIFEST.in`, delete both `recursive-include data/...` lines (the file may become empty — that's fine, or delete the file). In `setup.py`, remove the `package_data={'bilangsim': ['data/cdfs/*.h5', 'data/init_conds/*.h5']}` argument and the `include_package_data=True` line. (`setup.py` itself is replaced wholesale in Phase 5; this just keeps it consistent in the meantime.)
-
-- [ ] **Step 2: Commit**
-
-```bash
-git add MANIFEST.in setup.py
-git commit -m "chore: remove references to dropped HDF5 data files from packaging"
-```
-
-**Phase 3 verification:** `grep -rn '\.h5\|lang_ICs\|cdfs/' bilangsim/ setup.py MANIFEST.in` shows no remaining data-file dependency; warmup test passes; baseline holds.
+**Phase 4 verification:** warmup test passes; `grep -rn '\.h5\|lang_ICs\|cdfs/' bilangsim/` shows no remaining data-file dependency; baseline holds.
 
 ---
 
-## Phase 4 — Storage: HDFStore → Parquet, keep dill (OLD STACK)
+## Phase 5 — Storage: HDFStore → Parquet, keep dill
 
-**Milestone:** no `deepdish` / `tables` / pandas-HDFStore anywhere; tabular results round-trip through Parquet; `dill` snapshots untouched.
+**Milestone:** no `deepdish` / `tables` / pandas-HDFStore anywhere; tabular results round-trip through Parquet; `dill` snapshots untouched; baseline holds.
 
-### Task 4.1: Rewrite result saving to Parquet
+### Task 5.1: Rewrite result saving to Parquet
 
 **Files:**
-- Modify: `bilangsim/dataprocess.py` — imports (lines 5, 7), `save_model_data` (~240), `load_model_data` (~263), `optimize_data_saving_space` (~267)
+- Modify: `bilangsim/dataprocess.py` — `import deepdish` (line 7), `save_model_data` (~240), `load_model_data` (~263), `optimize_data_saving_space` (~267)
 - Test: `tests/test_storage.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -700,12 +758,12 @@ def test_parquet_results_roundtrip(tmp_path):
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `PYTHONHASHSEED=0 pytest tests/test_storage.py -v`
+Run: `PYTHONHASHSEED=0 uv run pytest tests/test_storage.py -v`
 Expected: FAIL — `save_model_data` still writes `.h5`, and `load_model_data` has a different signature.
 
 - [ ] **Step 3: Rewrite the persistence methods**
 
-In `bilangsim/dataprocess.py`: delete `import deepdish as dd` (line 7). Change `import matplotlib.pylab as plt` (line 5) to `import matplotlib.pyplot as plt`.
+In `bilangsim/dataprocess.py`, delete `import deepdish as dd` (line 7).
 
 Replace `save_model_data` (lines 240–261) with:
 
@@ -745,11 +803,11 @@ Replace `load_model_data` (lines 263–265) with:
         return model_df, agent_df
 ```
 
-Delete `optimize_data_saving_space` (lines 267–275) entirely — Parquet is already compressed, so it has no purpose. (Verify no caller: `grep -rn optimize_data_saving_space bilangsim/ tests/`.)
+Delete `optimize_data_saving_space` (lines 267–275) entirely — Parquet is already compressed. Verify no caller: `grep -rn optimize_data_saving_space bilangsim/ tests/`.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `PYTHONHASHSEED=0 pytest tests/test_storage.py -v`
+Run: `PYTHONHASHSEED=0 uv run pytest tests/test_storage.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -759,14 +817,14 @@ git add bilangsim/dataprocess.py tests/test_storage.py
 git commit -m "feat: write simulation results as Parquet parts, drop HDFStore/deepdish"
 ```
 
-### Task 4.2: Update the remaining deepdish/HDF readers
+### Task 5.2: Update the remaining deepdish/HDF readers
 
 **Files:**
 - Modify: `bilangsim/dataprocess.py` — `VizImpData.__init__` (~343), `PostProcessor.__init__` (~351)
 
 - [ ] **Step 1: Rewrite `PostProcessor.__init__`**
 
-Replace `PostProcessor.__init__` (lines 351–354+) so it reads via the new `load_model_data` instead of `pd.HDFStore`:
+Replace `PostProcessor.__init__` (lines 351–354+) with:
 
 ```python
     def __init__(self, data_filename=None, save_dir=''):
@@ -781,7 +839,7 @@ Read the rest of `PostProcessor`'s methods and update any that referenced `self.
 
 - [ ] **Step 2: Rewrite `VizImpData.__init__`**
 
-Replace `VizImpData.__init__` (lines 343–344) with a Parquet-based read:
+Replace `VizImpData.__init__` (lines 343–344) with:
 
 ```python
     def __init__(self, save_dir=''):
@@ -795,7 +853,7 @@ Expected: no output.
 
 - [ ] **Step 4: Run the full suite against the baseline**
 
-Run: `PYTHONHASHSEED=0 pytest tests/ -v --tb=short`
+Run: `PYTHONHASHSEED=0 uv run pytest tests/ -v --tb=short`
 Expected: baseline pass/fail set unchanged, plus `test_storage.py` passing. Fix any new regression before committing.
 
 - [ ] **Step 5: Commit**
@@ -805,132 +863,15 @@ git add bilangsim/dataprocess.py
 git commit -m "refactor: port PostProcessor and VizImpData off HDF5 to Parquet"
 ```
 
-**Phase 4 verification:** `grep -rn 'deepdish\|HDFStore\|to_hdf\|read_hdf' bilangsim/` is empty; `pip uninstall deepdish tables` then `pytest tests/` still matches the baseline.
+**Phase 5 verification:** `grep -rn 'deepdish\|HDFStore\|to_hdf\|read_hdf' bilangsim/` is empty; baseline holds plus `test_storage.py` passes.
 
 ---
 
-## Phase 5 — uv + pyproject + modern stack (Python 3.13)
+## Phase 6 — Final verification + docs
 
-**Milestone:** the project installs and runs green on Python 3.13 with numpy 2.x / pandas 2.x / networkx 3.x / numba latest, managed by `uv`. This is the "clean run" target — **stop here per scope.**
+**Milestone:** the "clean run" target is met and `CLAUDE.md` reflects the modernized state. **Stop here per scope.**
 
-### Task 5.1: Create pyproject.toml, delete legacy packaging
-
-**Files:**
-- Create: `pyproject.toml`
-- Delete: `setup.py`, `requirements.txt`
-
-- [ ] **Step 1: Write `pyproject.toml`**
-
-```toml
-[project]
-name = "bilangsim"
-version = "0.2.0"
-description = "Agent-based simulator of bilingual societies"
-authors = [{ name = "Paolo Gervasoni Vila", email = "pgervila@gmail.com" }]
-requires-python = ">=3.13"
-dependencies = [
-    "numpy>=2.0",
-    "scipy>=1.13",
-    "pandas>=2.2",
-    "numba>=0.60",
-    "scikit-learn>=1.5",
-    "matplotlib>=3.9",
-    "networkx>=3.3",
-    "pyarrow>=17.0",
-    "dill>=0.3.8",
-    "tqdm>=4.66",
-]
-
-[dependency-groups]
-dev = [
-    "pytest>=8.0",
-    "pytest-repeat>=0.9",
-    "pytest-cov>=5.0",
-]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["bilangsim"]
-```
-
-Then delete `setup.py` and `requirements.txt` (this also removes the broken `-e git+...#egg=bilangsim` line for free).
-
-- [ ] **Step 2: Sync the environment**
-
-Run: `uv sync --python 3.13`
-Expected: a `.venv` is created and all dependencies resolve. If `numba` cannot resolve against the newest `numpy`, cap numpy to numba's supported range (e.g. `"numpy>=2.0,<2.2"`) and re-run — record the chosen pin in a comment.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add pyproject.toml
-git rm setup.py requirements.txt
-git commit -m "build: migrate to uv + pyproject.toml, drop setup.py/requirements.txt"
-```
-
-### Task 5.2: Replace pyprind, fix matplotlib import in model.py
-
-**Files:**
-- Modify: `bilangsim/model.py` — line 12 (`matplotlib.pylab`), line 14 (`pyprind`), `run_model` (~724)
-
-- [ ] **Step 1: Swap `matplotlib.pylab` → `matplotlib.pyplot`**
-
-In `bilangsim/model.py` line 12, change `import matplotlib.pylab as plt` to `import matplotlib.pyplot as plt`.
-
-- [ ] **Step 2: Replace `pyprind` with `tqdm`**
-
-In `bilangsim/model.py`, delete `import pyprind` (line 14), add `from tqdm import tqdm`. In `run_model` (lines 724, 741), replace `pbar = pyprind.ProgBar(steps)` / `pbar.update()` with a `tqdm` wrapper: change the loop `for _ in range(steps):` to `for _ in tqdm(range(steps)):` and delete the `pbar` lines.
-
-- [ ] **Step 3: Verify the import chain**
-
-Run: `uv run python -c "import bilangsim"`
-Expected: import succeeds.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add bilangsim/model.py
-git commit -m "build: swap pyprind for tqdm, fix matplotlib.pylab import"
-```
-
-### Task 5.3: Fix numba, numpy 2.x, pandas 2.x, networkx 3.x breakages
-
-**Files:**
-- Modify: `bilangsim/agent.py` (the 6 `@njit` helpers, lines 15–52), `bilangsim/networks.py`, `bilangsim/dataprocess.py`, any site the test run flags
-
-- [ ] **Step 1: Compile-check the numba helpers**
-
-Run: `uv run python -c "import numpy as np; from bilangsim.agent import numba_comp_delta_S, numba_comp_R, numba_comp_max, numba_comp_exp, numba_counter, numba_in1d; numba_comp_R(np.array([1.0]), np.array([1.0]), np.array([1.0]))"`
-Expected: no `TypingError`. If a helper fails to compile under the new numba, adjust its signature/body minimally (most likely culprit: `numba_in1d`'s `argsort(kind='mergesort')` or `prange` usage) — keep the math identical.
-
-- [ ] **Step 2: Run the full suite, fix numpy/pandas/networkx fallout**
-
-Run: `PYTHONHASHSEED=0 uv run pytest tests/ -v --tb=short`
-Expected failure sources:
-- **numpy 2.x:** `np.NaN` → `np.nan`, `np.in1d` → `np.isin`, copy-semantics, scalar-conversion warnings-as-errors.
-- **pandas 2.x:** `DataFrame.append` removal (`dataprocess.py`), `groupby` `level=` changes (`PostProcessor.plot_population_size` ~line 402), `from_dict` dtype shifts.
-- **networkx 3.x:** the project pins `networkx==2.1`; in `bilangsim/networks.py` check `nx.DiGraph`/`nx.Graph` construction, `add_nodes_from`, `remove_node`, edge/adjacency access, and the `normalize`-based adjacency-matrix code in `compute_adj_matrices` — most basic calls are stable but adjacency/matrix helpers changed names across the 2→3 jump.
-
-Fix each at its call site. `grep -rn 'np\.NaN\|\.append(' bilangsim/` is a useful starting sweep (note: `.append` on lists is fine; only DataFrame/Series `.append` is removed).
-
-- [ ] **Step 3: Reconcile against the frozen baseline**
-
-Compare results to `docs/superpowers/plans/phase1-baseline.txt`. **Important:** numpy 2.x changes RNG internals, so bit-exact reproduction is not expected — compare *which tests pass/fail* and *distributions/shapes*, not exact values. Any test that passed in the baseline and now fails for a non-RNG reason is a regression to fix. Document the RNG-determinism break in `CLAUDE.md`.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add bilangsim/
-git commit -m "fix: port numba helpers and numpy/pandas call sites to 2.x"
-```
-
-### Task 5.4: Final verification and CLAUDE.md update
-
-**Files:**
-- Modify: `CLAUDE.md` (the "Current status / known blockers" and "Running" sections)
+### Task 6.1: End-to-end verification
 
 - [ ] **Step 1: End-to-end smoke run**
 
@@ -940,31 +881,41 @@ Expected: completes without error.
 - [ ] **Step 2: Full suite**
 
 Run: `PYTHONHASHSEED=0 uv run pytest tests/ -v`
-Expected: pass/fail set matches the baseline (accepted deferred-bug failures only).
+Expected: pass/fail set matches `docs/superpowers/plans/phase3-baseline.txt` (accepted deferred-bug failures only).
 
-- [ ] **Step 3: Update CLAUDE.md**
+- [ ] **Step 3: Dependency-cleanliness check**
 
-Rewrite the "Running the model" section to use `uv run`, and replace the "Current status / known blockers" section: the HDF5/Mesa/deepdish/stale-stack blockers are now resolved; note the new state (runs on Python 3.13 via uv; ICs are null + warmup; CDFs generated at runtime; results in Parquet; RNG no longer bit-reproducible across the numpy upgrade). Keep the pointer to the deferred model-bug list in `docs/legacy_language_model_analysis.md`.
+Run: `grep -rn 'mesa\|deepdish\|dd\.io\|HDFStore\|to_hdf\|pyprind\|import tables' bilangsim/ pyproject.toml`
+Expected: no output.
 
-- [ ] **Step 4: Commit**
+### Task 6.2: Update CLAUDE.md
+
+**Files:**
+- Modify: `CLAUDE.md` — "Running the model", "Running tests", "Current status / known blockers"
+
+- [ ] **Step 1: Rewrite the affected sections**
+
+Update "Running the model" and "Running tests" to use `uv run`. Replace "Current status / known blockers": the HDF5/Mesa/deepdish/stale-stack blockers are resolved; describe the new state — runs on Python 3.13 via uv; ICs are null + warmup; CDFs generated at runtime; results in Parquet; RNG no longer bit-reproducible vs. the legacy stack. Keep the pointer to the deferred model-bug list in `docs/legacy_language_model_analysis.md`.
+
+- [ ] **Step 2: Commit**
 
 ```bash
 git add CLAUDE.md
 git commit -m "docs: update CLAUDE.md to reflect modernized stack and storage"
 ```
 
-**Phase 5 verification:** `uv run pytest tests/` matches the frozen baseline on Python 3.13; the end-to-end smoke run succeeds; `grep -rn 'mesa\|deepdish\|pyprind\|tables' bilangsim/ pyproject.toml` is empty.
+**Phase 6 verification:** end-to-end smoke run succeeds; `pytest tests/` matches the frozen baseline; dependency-cleanliness grep is empty.
 
 ---
 
 ## Overall verification
 
 1. `uv sync --python 3.13` resolves cleanly.
-2. `PYTHONHASHSEED=0 uv run pytest tests/` runs to completion; pass/fail set matches `docs/superpowers/plans/phase1-baseline.txt` (modulo RNG-sensitive value checks).
+2. `PYTHONHASHSEED=0 uv run pytest tests/` runs to completion; pass/fail set matches `docs/superpowers/plans/phase3-baseline.txt`.
 3. `PYTHONHASHSEED=0 uv run python -c "from bilangsim import BiLangModel; BiLangModel(400, num_clusters=2).run_model(5)"` succeeds.
 4. `grep -rn 'mesa\|deepdish\|dd\.io\|HDFStore\|to_hdf\|pyprind\|import tables' bilangsim/` returns nothing.
 5. A short run with `save_dir` produces `*.parquet` result parts and an `init_conds.pkl`, and `DataProcessor.load_model_data` round-trips them.
-6. No model science changed: the only behavioral differences are (a) agents start from null ICs + warmup instead of the IC file, (b) CDFs are generated rather than loaded, (c) RNG streams differ post-numpy-2.x. All documented model bugs remain for the follow-up plan.
+6. No model science changed: the only behavioral differences are (a) agents start from null ICs + warmup instead of the IC file, (b) CDFs are generated rather than loaded, (c) RNG streams differ on the modern numpy. All documented model bugs remain for the follow-up plan.
 
 ## Notes for the follow-up plan (out of scope here)
 

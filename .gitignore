@@ -1,0 +1,44 @@
+# Byte-compiled / optimized / cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Coverage / test artifacts
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# uv
+# (uv.lock is committed intentionally; .venv is ignored above)
+
+# Simulation outputs
+pickled_model
+*.parquet
+init_conds.pkl
+step*.png
+model_data.h5
+opt_model_data.h5
+
+# Legacy HDF5 data blobs (dropped from the project)
+*.h5
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
