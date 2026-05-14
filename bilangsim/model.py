@@ -64,8 +64,11 @@ class BiLangModel:
     media_lang_policy = None
 
     steps_per_year = 36
-    max_lifetime = 4000
+    # per-age arrays (pct, excl_c, cdf rows) all have length max_life_steps;
+    # the model curves built by set_conv_length_age_factor / set_death_prob_curve
+    # are sized to the same value so ages can never index past them
     max_life_steps = 3600
+    max_lifetime = max_life_steps
     langs = ('L1', 'L12', 'L21', 'L2')
     similarity_corr = {'L1': 'L2', 'L2': 'L1', 'L12': 'L2', 'L21': 'L1'}
     # avg conversation : 3 min, 20 sec

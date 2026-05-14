@@ -242,8 +242,14 @@ class BaseAgent:
                 self.info['language'] = 0
 
     def grow(self, growth_inc=1):
-        """ Convenience method to update agent age at each step """
-        self.info['age'] += growth_inc
+        """ Convenience method to update agent age at each step.
+
+        Age is clamped to max_life_steps - 1 so it can never index past the
+        per-age arrays (pct, excl_c, cdf rows), all of which have length
+        max_life_steps. At this age the death-probability curve makes survival
+        astronomically unlikely; the clamp is a guard against an off-by-one.
+        """
+        self.info['age'] = min(self.info['age'] + growth_inc, self.max_life_steps - 1)
 
     def evolve(self, new_class, ret_output=False, upd_course=False):
         """ It replaces current agent with a new agent subclass instance.
