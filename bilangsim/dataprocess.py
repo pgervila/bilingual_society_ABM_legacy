@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from collections import Counter, defaultdict
-import deepdish as dd
 import dill
 
 from .agent import Baby, Child, Adolescent, Young, YoungUniv

@@ -8,14 +8,11 @@ import numpy as np
 import networkx as nx
 # import matplotlib
 # matplotlib.use("TKAgg")
-import matplotlib.pylab as plt
+import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-import pyprind
-import deepdish as dd
+from tqdm import tqdm
 
-# IMPORT MESA LIBRARIES ( Model, Grid, Schedule )
-from mesa import Model
-from mesa.space import MultiGrid
+from .space import MultiGrid
 from .schedule import StagedActivationModif
 
 # IMPORT MODEL LIBRARIES
@@ -38,7 +35,7 @@ print('np_seed is {}'.format(np_seed))
 print('python hash seed is', os.environ.get('PYTHONHASHSEED', 'not set'))
 
 
-class BiLangModel(Model):
+class BiLangModel:
 
     class _Decorators:
         @classmethod
@@ -720,14 +717,13 @@ class BiLangModel(Model):
                 * viz_steps_period : integer. Save frames every specified number of steps
                 * save_dir : string. It specifies directory where frames will be saved
         """
-        pbar = pyprind.ProgBar(steps)
         self.save_dir = save_dir
         if viz_steps_period:
             script_dir = os.path.dirname(__file__)
             results_dir = os.path.join(script_dir, save_dir)
             if not os.path.isdir(results_dir):
                 os.makedirs(results_dir)
-        for _ in range(steps):
+        for _ in tqdm(range(steps)):
             self.step()
             if not self.schedule.steps % save_data_freq:
                 self.data_process.save_model_data(save_data_freq)
@@ -737,7 +733,6 @@ class BiLangModel(Model):
                 if not self.schedule.steps % viz_steps_period:
                     self.data_viz.show_results(step=self.schedule.steps,
                                                plot_results=False, save_fig=True)
-            pbar.update()
 
     def run_and_animate(self, steps, plot_type='imshow'):
         fig = plt.figure()
