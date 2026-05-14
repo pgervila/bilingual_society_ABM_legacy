@@ -90,6 +90,19 @@ def Zipf_Mand_3S_CDF_comp(n, alpha_1=1.16, alpha_2=1.48, alpha_3=1.866,
     return zeta
 
 
+def vocab_ceiling_curve(age_steps, steps_per_year=36, n_min=500, n_max=10000,
+                        midpoint_years=8, rate=0.4):
+    """Age-dependent ceiling on the raw vocabulary size an agent can sample from.
+
+    Logistic growth in years: from n_min in early childhood to n_max in adulthood.
+    Replaces the legacy externally-precomputed age->vocab mapping. Returns an int
+    (or int array) suitable as the `n` argument to the Zipf CDF generators.
+    """
+    age_years = np.asarray(age_steps) / steps_per_year
+    n = n_min + (n_max - n_min) / (1 + np.exp(-rate * (age_years - midpoint_years)))
+    return np.rint(n).astype(np.int64)
+
+
 def randZipf(zipf_cum_distr, numSamples):
     """fast computation of array of Zipf samples with dim = numSamples
     It needs Zipf CDF as input"""
