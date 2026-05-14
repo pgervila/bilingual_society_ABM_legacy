@@ -1,2 +1,0 @@
-recursive-include data/cdfs *.h5
-recursive-include data/init_conds *.h5
