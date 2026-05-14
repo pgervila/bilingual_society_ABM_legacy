@@ -336,7 +336,7 @@ def test_update_lang_arrays(dummy_agent, sample_words, mode_type):
     # get words whose counting will be updated
     act, act_c = sample_words['L1']
     known_words = np.nonzero(ag.lang_stats['L1']['R'] > 0.1)
-    kn_act_bool = np.in1d(act, known_words, assume_unique=True)
+    kn_act_bool = np.isin(act, known_words, assume_unique=True)
     act_upd, act_upd_c = act[kn_act_bool], act_c[kn_act_bool]
 
     wc_init = ag.lang_stats['L1']['wc'][act_upd].copy()
@@ -344,7 +344,14 @@ def test_update_lang_arrays(dummy_agent, sample_words, mode_type):
     # check calls through patches
     with patch.object(ag, 'process_unknown_words') as proc_uw:
         with patch.object(ag, 'update_words_memory') as uwm:
-            if np.all(kn_act_bool):
+            if mode_type == 'speak':
+                # speaking treats every word as known by definition: words memory
+                # is always updated and unknown-word processing is never invoked,
+                # regardless of the agent's current knowledge
+                ag.update_lang_arrays(sample_words, mode_type=mode_type)
+                assert proc_uw.call_count == 0
+                assert uwm.call_count == 1
+            elif np.all(kn_act_bool):
                 # call method to test
                 ag.update_lang_arrays(sample_words, mode_type=mode_type)
                 assert proc_uw.call_count == 0
