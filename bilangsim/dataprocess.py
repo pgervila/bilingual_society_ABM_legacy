@@ -2,42 +2,42 @@ import os
 
 import numpy as np
 import pandas as pd
-import matplotlib.pylab as plt
+import matplotlib.pyplot as plt
 from collections import Counter, defaultdict
 import deepdish as dd
 import dill
 
-from mesa.datacollection import DataCollector
 from .agent import Baby, Child, Adolescent, Young, YoungUniv
 from .agent import Adult, Teacher, TeacherUniv, Pensioner
 
 
-class DataProcessor(DataCollector):
+class DataProcessor:
     def __init__(self, model, save_dir=''):
         self.model = model
         self.model_data = None
-        super().__init__(model_reporters={"pct_spa": lambda dp: dp.get_lang_stats(0),
-                                          "pct_bil": lambda dp: dp.get_lang_stats(1),
-                                          "pct_cat": lambda dp: dp.get_lang_stats(2),
-                                          "total_num_agents": lambda dp: len(dp.model.schedule.agents),
-                                          "pct_cat_in_biling": lambda dp: dp.get_global_bilang_inner_evol()
-                                         },
-                         agent_reporters={"pct_cat_knowledge": lambda a: a.lang_stats['L2']['pct'][a.info['age']],
-                                          "pct_L21_knowledge": lambda a: a.lang_stats['L21']['R'].mean(),
-                                          "pct_spa_knowledge": lambda a: a.lang_stats['L1']['pct'][a.info['age']],
-                                          "pct_L12_knowledge": lambda a: a.lang_stats['L12']['R'].mean(),
-                                          "tokens_per_step_spa": lambda a: (a.wc_final['L1'] - a.wc_init['L1']).sum(),
-                                          "tokens_per_step_cat": lambda a: (a.wc_final['L2'] - a.wc_init['L2']).sum(),
-                                          "x": lambda a: a.pos[0],
-                                          "y": lambda a: a.pos[1],
-                                          "age": lambda a: a.info['age'],
-                                          "language": lambda a: a.info['language'],
-                                          "excl_c": lambda a: a.lang_stats['L1']['excl_c'][a.info['age']] if a.info['language'] == 2 else a.lang_stats['L2']['excl_c'][a.info['age']],
-                                          "clust_id": lambda a: a.loc_info['home'].info['clust'],
-                                          "agent_type": lambda a: type(a).__name__,
-                                          "num_conv_step": lambda a: a._conv_counts_per_step
-                                          }
-                         )
+        self.model_reporters = {"pct_spa": lambda dp: dp.get_lang_stats(0),
+                                "pct_bil": lambda dp: dp.get_lang_stats(1),
+                                "pct_cat": lambda dp: dp.get_lang_stats(2),
+                                "total_num_agents": lambda dp: len(dp.model.schedule.agents),
+                                "pct_cat_in_biling": lambda dp: dp.get_global_bilang_inner_evol()
+                                }
+        self.agent_reporters = {"pct_cat_knowledge": lambda a: a.lang_stats['L2']['pct'][a.info['age']],
+                                "pct_L21_knowledge": lambda a: a.lang_stats['L21']['R'].mean(),
+                                "pct_spa_knowledge": lambda a: a.lang_stats['L1']['pct'][a.info['age']],
+                                "pct_L12_knowledge": lambda a: a.lang_stats['L12']['R'].mean(),
+                                "tokens_per_step_spa": lambda a: (a.wc_final['L1'] - a.wc_init['L1']).sum(),
+                                "tokens_per_step_cat": lambda a: (a.wc_final['L2'] - a.wc_init['L2']).sum(),
+                                "x": lambda a: a.pos[0],
+                                "y": lambda a: a.pos[1],
+                                "age": lambda a: a.info['age'],
+                                "language": lambda a: a.info['language'],
+                                "excl_c": lambda a: a.lang_stats['L1']['excl_c'][a.info['age']] if a.info['language'] == 2 else a.lang_stats['L2']['excl_c'][a.info['age']],
+                                "clust_id": lambda a: a.loc_info['home'].info['clust'],
+                                "agent_type": lambda a: type(a).__name__,
+                                "num_conv_step": lambda a: a._conv_counts_per_step
+                                }
+        self.model_vars = {k: [] for k in self.model_reporters}
+        self.agent_vars = {k: [] for k in self.agent_reporters}
 
         self.init_conds = {'num_clusters': self.model.geo.num_clusters,
                            'cluster_sizes': self.model.geo.cluster_sizes,
