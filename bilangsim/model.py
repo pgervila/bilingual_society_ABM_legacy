@@ -79,9 +79,10 @@ class BiLangModel:
     def __init__(self, num_people, spoken_only=True, width=100, height=100, max_people_factor=5,
                  init_lang_distrib=[0.25, 0.65, 0.1], num_clusters=10, immigration=False, pct_immigration=0.005,
                  lang_ags_sorted_by_dist=True, lang_ags_sorted_in_clust=True, mean_word_distance=0.3,
-                 check_setup=False, rand_seed=rand_seed, np_seed=np_seed):
+                 check_setup=False, warmup_steps=0, rand_seed=rand_seed, np_seed=np_seed):
         # TODO: group all attrs in a dict to keep it more tidy
         self.num_people = num_people
+        self.warmup_steps = warmup_steps
         if spoken_only:
             self.vocab_red = 500
         else:
@@ -146,6 +147,12 @@ class BiLangModel:
         # check model setup if requested
         if check_setup:
             self.check_model_set_up()
+
+        # warmup phase: advance the simulation so a realistic demography emerges
+        # from null initial conditions before data collection begins. Uses
+        # schedule.step() directly so these steps are not part of collected data.
+        for _ in range(self.warmup_steps):
+            self.schedule.step()
 
     def _build_cdfs(self):
         """Build age-indexed Zipf-Mandelbrot CDFs at construction time.
