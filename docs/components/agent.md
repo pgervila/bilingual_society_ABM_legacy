@@ -13,15 +13,15 @@
 
 **Capability mixins:**
 - `BaseAgent` (`:55`) — identity (`info`, `loc_info`, `lang_stats`), IC setup, growth, death, family lookups, `evolve`.
-- `ListenerAgent(BaseAgent)` (`:394`) — `listen`, `update_lang_arrays`, `process_unknown_words`, `learn_unknown_words`, `update_words_memory`, `update_memory_retention`, school registration.
-- `SpeakerAgent(ListenerAgent)` (`:762`) — `pick_vocab` (core speaking algo), `study_vocab`, `update_acquaintances`, friendship logic, exclusion reactions.
-- `SchoolAgent(SpeakerAgent)` (`:1061`) — `go_to_school`, `speak_at_school`.
-- `IndepAgent(SpeakerAgent)` (`:1112`) — grid-mobile agents; `move_to`, `speak_to_group`, `meet_agent`.
+- `ListenerAgent(BaseAgent)` (`:440`) — `listen`, `update_lang_arrays`, `process_unknown_words`, `learn_unknown_words`, `update_words_memory`, `update_memory_retention`, school registration.
+- `SpeakerAgent(ListenerAgent)` (`:808`) — `pick_vocab` (core speaking algo), `study_vocab`, `update_acquaintances`, friendship logic, exclusion reactions.
+- `SchoolAgent(SpeakerAgent)` (`:1107`) — `go_to_school`, `speak_at_school`.
+- `IndepAgent(SpeakerAgent)` (`:1158`) — grid-mobile agents; `move_to`, `speak_to_group`, `meet_agent`.
 
 **Concrete age/role classes** (instantiated + scheduled):
-`Baby` (`:1220`), `Child` (`:1316`), `Adolescent` (`:1376`), `Young` (`:1461`),
-`YoungUniv` (`:1812`), `Adult` (`:1901`), `Worker` (`:1951`), `Teacher` (`:1956`),
-`TeacherUniv` (`:2046`), `Pensioner` (`:2111`).
+`Baby` (`:1266`), `Child` (`:1362`), `Adolescent` (`:1422`), `Young` (`:1507`),
+`YoungUniv` (`:1858`), `Adult` (`:1947`), `Worker` (`:1997`), `Teacher` (`:2002`),
+`TeacherUniv` (`:2092`), `Pensioner` (`:2157`).
 
 Agents **change class as they age** via `evolve(new_class, ...)` — `Child` →
 `Adolescent` → `Young`/`YoungUniv` → `Adult` → `Pensioner`, and `Adult` →
@@ -46,19 +46,46 @@ NumPy arrays of length `vocab_red`:
 | `excl_c` | `(max_life_steps,)` float | Per-age linguistic-exclusion counter. |
 | `mem_eff` | `(vocab_red,)` int | Per-word min activations before encoding (`randint(3,7)`). |
 
-## Initial conditions — **current state**
+## Initial conditions
 
-`_set_null_lang_attrs(lang, S_0=0.01, t_0=1000)` (`:114`) seeds a store with
-`S=0.01`, `t=1000` (→ `R≈0`), `wc=0`, plus derived `pct`, `mem_eff`, `excl_c`.
+ICs are read from the per-age table `model.lang_ICs` built by
+`BiLangModel._build_ics()` ([ic_generator.md](ic_generator.md)). Both methods below
+are the legacy code, restored verbatim (Oct 2026).
 
-`set_lang_ics(s_0=0.01, t_0=1000, biling_key=None)` (`:139`) currently calls
-`_set_null_lang_attrs` for **all four stores** — i.e. graded initial bilingualism
-is a **no-op**. The legacy per-age IC file was dropped; `biling_key` is accepted
-for call-site compatibility but ignored. This is the documented deferred caveat.
+**`_set_lang_attrs(lang, pct_key)`** (`:114`): for bucket `pct_key` (e.g. `'75_pct'`),
+copies row `info['age']` of the table's `t` (cast to float64), `S` and `wc` into
+`lang_stats[lang]`. The copies are private and writable; the table itself is
+read-only. It then derives `R = exp(-k·t/S)` (float64), `pct[age]` (fraction of
+words with `R > 0.9`), `mem_eff` (`set_memory_effort_per_word`), and a zeroed
+`excl_c`.
+
+**`_set_null_lang_attrs(lang, S_0=0.01, t_0=1000)`** (`:145`): no knowledge at all:
+`S=0.01`, `t=1000` (→ `R≈0`, float32), `wc=0`, plus derived `pct`, `mem_eff`,
+`excl_c`, and `set_excl_weights()`. Used for the unknown language of monolinguals,
+for `L12`/`L21`, and for agents created with `import_ic=False` (e.g. babies, whose
+knowledge then grows by listening).
+
+**`set_lang_ics(s_0=0.01, t_0=1000, biling_key=None)`** (`:170`), by `info['language']`:
+
+| Language type | `L1` | `L2` | `L12`, `L21` |
+|---|---|---|---|
+| `0` (L1-mono) | `'100_pct'` | null | null |
+| `2` (L2-mono) | null | `'100_pct'` | null |
+| `1` (bilingual) | `'{k}_pct'` | `'{100-k}_pct'` | null |
+
+For bilinguals, `k = biling_key`. If none is given, it is drawn uniformly from
+`model.ic_pct_keys = [10, 25, 50, 75, 90]`. At model setup
+`model.set_lang_ics_in_family` passes `biling_key` to correlate children with
+their parents (see [model.md](model.md)). Finally `set_excl_weights()`.
+
+Callers: `model.set_lang_ics_in_family` (initial families and immigrant families),
+`NetworkBuilder.define_family_networks` (agents left over from the family
+partition), and `BaseAgent.__init__` when `import_ic=True` (e.g. teachers created
+by `city_objects.py:240`).
 
 ## The learning core
 
-### `update_lang_arrays(sample_words, mode_type='speak', delta_s_factor=0.1, ...)` (`:441`)
+### `update_lang_arrays(sample_words, mode_type='speak', delta_s_factor=0.1, ...)` (`:487`)
 
 Entry point that turns a bag of `(word_indices, counts)` per language into memory
 updates. Branches on `mode_type`:
@@ -71,13 +98,13 @@ updates. Branches on `mode_type`:
 
 Then, if any words remain, call `update_words_memory`.
 
-### `process_unknown_words(...)` (`:517`)
+### `process_unknown_words(...)` (`:563`)
 
 Models catching new words. Two routes:
 - **Recognition:** unknown word is *similar enough* (`edit_distances < max_edit_dist`) to a word already known in the correlated other language (`similarity_corr`) and that word's `R > pct_threshold_und`. Recognised words increment `wc`; those crossing `mem_eff` become updatable.
 - **Identification:** otherwise, probability of picking up a new word scales with the fraction of the conversation understood (`min_prob_und` floor lets beginners learn). Drawn via `binomial`/`multinomial`; words crossing `mem_eff` become updatable.
 
-### `update_words_memory(lang, act, act_c, ds_factor, ...)` (`:624`)
+### `update_words_memory(lang, act, act_c, ds_factor, ...)` (`:670`)
 
 The SM-2 stability update. Constants `a=7.6, b=0.023, c=-0.031, d=-0.2`.
 `ΔS = ds_factor · act_c · (a · S^(-b) · exp(c·100·R) + d)` via `numba_comp_delta_S`.
@@ -86,18 +113,19 @@ updated `S` (the notebook's "simplification with good approx"). Then `t` for
 activated words is reset to 0 via `step_mask`, and `update_memory_retention` recomputes `R`.
 
 > **Note (candidate bug):** the double-application means total effective activations
-> ≈ `2·act_c − 1` per step, roughly double the standalone IC-recipe path in
-> `scripts/build_ics.py`. Flagged for the model-correctness follow-up.
+> ≈ `2·act_c − 1` per step, roughly double the IC recipe in `bilangsim/ic_generator.py`
+> (1 + `act_c − 1`). So agents' ICs follow the 2019 recipe, while their later learning
+> uses this stronger rule. Flagged for the model-correctness follow-up.
 
-### `update_memory_retention(lang, pct_threshold=0.9)` (`:679`)
+### `update_memory_retention(lang, pct_threshold=0.9)` (`:725`)
 
 Recomputes `R = exp(-k·t/S)` and updates `pct[age]` = fraction of words with
 `R > pct_threshold`. Called both here and in the scheduler pre-stage bookkeeping.
 
-## `pick_vocab(lang, conv_length='M', min_age_interlocs=None, ...)` (`:813`) — speaking + code-switch cascade
+## `pick_vocab(lang, conv_length='M', min_age_interlocs=None, ...)` (`:859`) — speaking + code-switch cascade
 
 1. Sample `num_words` word *intents* from the age-indexed Zipf CDF (`cdf_data['s'][age]`, or the youngest interlocutor's age).
-2. Pick the store variant: `L1` vs `L12` (or `L2` vs `L21`) by whichever has higher `pct`. **Known bug:** `L12`/`L21` `pct` is never updated (always 0), so the transition store is effectively never chosen at this step (`agent.py:876`).
+2. Pick the store variant: `L1` vs `L12` (or `L2` vs `L21`) by whichever has higher `pct`. **Known bug:** `L12`/`L21` `pct` is never updated (always 0), so the transition store is effectively never chosen at this step (`agent.py:922`).
 3. **Retrieval mask:** a word is successfully spoken iff `random() <= R[word]`.
 4. **Cascade for failed retrievals** (this is where code-switching emerges):
    - Missing words are retried in the paired store (`L1↔L12`, `L2↔L21`).
@@ -108,9 +136,9 @@ Returns `spoken_words` = `{store: [indices, counts]}`, consumed by listeners in 
 
 ## Lifecycle methods
 
-- **`evolve(new_class, ...)`** (`:254`): rebuild instance as `new_class`, carrying over state; subclasses override (e.g. `Adolescent.evolve` handles university enrolment).
-- **`reproduce(...)`**: `Young` (`:1538`, `day_prob=0.0014`, ≤4 children) and `Adult` (`:1916`, `day_prob=0.0024`, `limit_age=40`) create babies; language-with-each-parent set via `get_newborn_lang` and the family network.
-- **`random_death(...)`** (`:294`): draws against `model.death_prob_curve[age]`; overridden in `Teacher`/`TeacherUniv`/`Pensioner` to also handle job/course vacancy backfill.
+- **`evolve(new_class, ...)`** (`:300`): rebuild instance as `new_class`, carrying over state; subclasses override (e.g. `Adolescent.evolve` handles university enrolment).
+- **`reproduce(...)`**: `Young` (`:1584`, `day_prob=0.0014`, ≤4 children) and `Adult` (`:1962`, `day_prob=0.0024`, `limit_age=40`) create babies; language-with-each-parent set via `get_newborn_lang` and the family network.
+- **`random_death(...)`** (`:340`): draws against `model.death_prob_curve[age]`; overridden in `Teacher`/`TeacherUniv`/`Pensioner` to also handle job/course vacancy backfill.
 - **`move_to`, `speak_to_group`, `meet_agent`** (`IndepAgent`): grid movement and group conversation initiation.
 
 ## The four stages (per concrete class)

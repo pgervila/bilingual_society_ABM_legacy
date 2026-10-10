@@ -17,7 +17,7 @@ uv sync --python 3.13
 PYTHONHASHSEED=0 uv run python -c "from bilangsim import BiLangModel; m = BiLangModel(400, num_clusters=2); m.run_model(5)"
 ```
 
-`BiLangModel` accepts `warmup_steps=N` — it advances the schedule N steps before data collection so a realistic demography emerges from null initial conditions (see "Current status").
+Agents start with realistic, graded linguistic knowledge from the per-age initial-conditions (IC) table (see "Current status"). The first construction on a machine builds the table (~3 s) and caches it on disk (~130 MB in `~/.cache/bilangsim`, override with `BILANGSIM_CACHE_DIR`); later constructions load it in ~0.2 s. `scripts/build_ics.py` pre-builds the cache and prints sanity statistics. `BiLangModel` also accepts `warmup_steps=N`, which advances the schedule N steps before data collection (optional; no longer needed for a realistic start).
 
 ## Running tests
 
@@ -29,7 +29,7 @@ PYTHONHASHSEED=0 uv run pytest tests/test_model.py             # one file
 PYTHONHASHSEED=0 uv run pytest tests/test_agent.py::test_name  # one test
 ```
 
-Current state: 86 passing, 1 skipped (`test_run_conversation` — brittle by construction, see `docs/superpowers/plans/phase3-baseline.txt`).
+Current state: 107 passing, 0 skipped.
 
 ## Current status
 
@@ -37,13 +37,13 @@ The May 2026 modernization (plan + log: `docs/superpowers/plans/2026-05-14-tech-
 
 1. **Modern stack via `uv`.** Python 3.13, numpy 2.x, pandas 3.x, networkx 3.x, numba, scikit-learn, pyarrow, dill, tqdm. `pyproject.toml` replaces `setup.py`/`requirements.txt`.
 2. **Mesa removed entirely.** `bilangsim/space.py` vendors a minimal `MultiGrid`; `StagedActivationModif` and `DataProcessor` are now standalone classes; `BiLangModel` is a plain class.
-3. **HDF5 input files dropped.** The two missing `.h5` files are gone. Age-indexed Zipf CDFs are generated at runtime by `BiLangModel._build_cdfs()` (using `zipf_generator.vocab_ceiling_curve`). Agents are seeded with **null initial conditions** (`_set_null_lang_attrs`) instead of the per-age IC file — so a freshly-constructed model has agents that know nothing; use `warmup_steps` to reach a realistic state.
+3. **HDF5 input files dropped; their contents are regenerated at runtime.** Age-indexed Zipf CDFs come from `BiLangModel._build_cdfs()` (`zipf_generator.age_indexed_cdfs`). The per-age IC table comes from `BiLangModel._build_ics()` (`bilangsim/ic_generator.py`, a faithful re-implementation of the recovered 2019 notebook recipe, cached in-process and on disk). Legacy `set_lang_ics` / `_set_lang_attrs` were restored verbatim (Oct 2026, plan: `docs/superpowers/plans/2026-10-10-ic-integration.md`): monolinguals get their language from bucket `'100_pct'`, bilinguals from `'{k}_pct'`/`'{100-k}_pct'` (`biling_key`, correlated with parents by `set_lang_ics_in_family`), `L12`/`L21` start null.
 4. **Storage modernized.** Simulation results are written as numbered Parquet parts (`DataProcessor.save_model_data` / `load_model_data`); full-model snapshots still use `dill`. No `deepdish`/`tables`/HDFStore anywhere.
 
 **Known caveats / deferred to the follow-up plan** (see `docs/legacy_language_model_analysis.md` and the plan doc's "Notes for the follow-up plan"):
 - RNG streams differ from the legacy stack (numpy 2.x), so runs are not bit-reproducible against pre-modernization results.
-- `set_lang_ics`' `biling_key` is currently a no-op; graded initial bilingualism was dropped with the IC file.
-- `test_run_conversation` is skipped — it fishes the shared model for agents by language label and is brittle under null ICs; needs a rewrite.
+- The IC recipe applies the SM-2 update as one activation plus `act_c - 1` in bulk, while live `update_words_memory` applies `act_c` plus `act_c - 1` (≈ `2·act_c − 1`, likely a bug). ICs therefore follow the 2019 recipe, not the live update rule. The recipe also looks generous for young partial-exposure agents (e.g. ~37% of words above R>0.9 at 5 y with 25% exposure).
+- Model snapshots (`pickle_model`) include the IC table (~260 MB in RAM), as legacy did.
 - `PostProcessor.plot_population_size` uses pandas-2.x-removed `.count(level=...)` — untested analysis helper, not run-blocking.
 - The documented model bugs in `docs/legacy_language_model_analysis.md` (e.g. `L12` `pct` never updated) are untouched.
 

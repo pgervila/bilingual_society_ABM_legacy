@@ -23,9 +23,9 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=50,
                         help="Steps to simulate (after warmup).")
     parser.add_argument("--warmup", type=int, default=0,
-                        help="Warmup steps before data collection begins. "
-                             "Currently a fallback while the proper IC system is "
-                             "being redesigned; leave at 0 once that lands.")
+                        help="Optional steps to run before data collection begins. "
+                             "Agents already start with realistic knowledge from the "
+                             "IC table, so 0 is the normal choice.")
     parser.add_argument("--save-dir", default="",
                         help="Directory for Parquet result parts. Omit to skip saving.")
     parser.add_argument("--save-data-freq", type=int, default=50,

@@ -14,15 +14,16 @@ For the scientific model narrative and the catalogue of known model bugs, see
 
 | Doc | Module | What it covers |
 |---|---|---|
-| [model.md](model.md) | `bilangsim/model.py` | `BiLangModel` orchestration, `__init__` setup sequence, class constants, the conversation engine (`run_conversation` / `get_conv_params` = MAXIMIN), demography curves, `run_model`, `update_centers`, warmup |
-| [agent.md](agent.md) | `bilangsim/agent.py` | Agent class hierarchy, per-word memory state, the learning core (`update_lang_arrays` / `update_words_memory`), `pick_vocab` (speaking + code-switch cascade), the 4-stage behaviours per concrete class, lifecycle (`evolve`, `reproduce`, `random_death`) |
+| [model.md](model.md) | `bilangsim/model.py` | `BiLangModel` orchestration, `__init__` setup sequence, class constants, the conversation engine (`run_conversation` / `get_conv_params` = MAXIMIN), demography curves, `_build_ics`, `set_lang_ics_in_family`, `run_model`, `update_centers`, warmup |
+| [agent.md](agent.md) | `bilangsim/agent.py` | Agent class hierarchy, per-word memory state, initial conditions (`set_lang_ics`), the learning core (`update_lang_arrays` / `update_words_memory`), `pick_vocab` (speaking + code-switch cascade), the 4-stage behaviours per concrete class, lifecycle (`evolve`, `reproduce`, `random_death`) |
 | [schedule.md](schedule.md) | `bilangsim/schedule.py` | `StagedActivationModif`, the anatomy of a single `step()`, periodic hooks |
 | [geomapping.md](geomapping.md) | `bilangsim/geomapping.py` | `GeoMapper`: cluster layout, object placement, initial population generation, runtime spatial bookkeeping |
 | [city_objects.md](city_objects.md) | `bilangsim/city_objects.py` | `Home`, `EducationCenter`→`School`/`Faculty`, `University`, `Job`, course/teacher lifecycle |
 | [networks.md](networks.md) | `bilangsim/networks.py` | `NetworkBuilder`, the four `networkx` graphs, adjacency matrices |
 | [dataprocess.md](dataprocess.md) | `bilangsim/dataprocess.py` | `DataProcessor` collection + Parquet/dill persistence, `DataViz`, `PostProcessor`, `VizImpData` |
 | [space.md](space.md) | `bilangsim/space.py` | Vendored minimal `MultiGrid` (Mesa replacement) |
-| [zipf_generator.md](zipf_generator.md) | `bilangsim/zipf_generator/` | Word-frequency CDF math, `randZipf`, `vocab_ceiling_curve` |
+| [zipf_generator.md](zipf_generator.md) | `bilangsim/zipf_generator/` | Word-frequency CDF math, `randZipf`, `vocab_ceiling_curve`, `age_indexed_cdfs` |
+| [ic_generator.md](ic_generator.md) | `bilangsim/ic_generator.py`, `scripts/build_ics.py` | Per-age linguistic initial-conditions table: 2019 recipe, buckets, caching, CLI |
 
 ## Cross-cutting conventions
 

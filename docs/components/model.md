@@ -9,7 +9,7 @@ and the conversation engine. As of the modernization it is a **plain class**
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `ic_pct_keys` | `[10, 25, 50, 75, 90]` | Legacy IC exposure buckets. **Currently unused** — ICs are null (see below). |
+| `ic_pct_keys` | `[10, 25, 50, 75, 90]` | Bilingual IC exposure levels `k` (L1 from bucket `'{k}_pct'`, L2 from `'{100-k}_pct'`). See `set_lang_ics_in_family`. |
 | `family_size` | `4` | Agents per initial family (2 parents + 2 children). |
 | `school_lang_policy` | `[0, 1]` | Languages a school may teach in. |
 | `jobs_lang_policy` / `media_lang_policy` | `None` | Placeholders. |
@@ -22,7 +22,7 @@ and the conversation engine. As of the modernization it is a **plain class**
 `_Decorators.conv_counter` is a nested decorator that increments each agent's
 `_conv_counts_per_step` (used for data collection).
 
-## `__init__` setup sequence (`model.py:79-155`)
+## `__init__` setup sequence (`model.py:79-156`)
 
 Key parameters: `num_people`, `spoken_only=True` (→ `vocab_red` 500 vs 1000),
 `width=100, height=100`, `max_people_factor=5` (caps total agent id pool),
@@ -36,7 +36,7 @@ Ordered steps:
 2. Build `edit_distances` — `binomial` Levenshtein-distance proxies between L1↔L2 (`'original'`) and mixed stores (`'mixed'`), length `vocab_red`.
 3. `set_available_ids` = pool of `max_people_factor * num_people` unique ids.
 4. **`_build_cdfs()`** — generate age-indexed Zipf-Mandelbrot CDFs at runtime (replaces the dropped `lang_cdfs_vs_step.h5`). Result in `self.cdf_data = {'s': (3600, vocab_red)}`.
-5. `self.lang_ICs = None` — **legacy IC file dropped; agents seeded null.**
+5. **`_build_ics()`** — load (or build and cache) the per-age linguistic IC table into `self.lang_ICs` (replaces the dropped `lang_spoken_ics_vs_step.h5`). Must run before `GeoMapper`, which creates the agents.
 6. `init_mode = True`.
 7. Create `MultiGrid(height, width, False)` and `StagedActivationModif` with stages `["stage_1".."stage_4"]`, `shuffle=True`.
 8. `GeoMapper(self, num_clusters).map_model_objects()` — lays out city + population.
@@ -45,35 +45,62 @@ Ordered steps:
 11. `set_conv_length_age_factor()` + `set_death_prob_curve()`.
 12. `init_mode = False`.
 13. Optional `check_model_set_up()`.
-14. **Warmup:** run `schedule.step()` `warmup_steps` times *without* data collection (so a realistic demography emerges from null ICs before collection begins).
+14. **Warmup (optional):** run `schedule.step()` `warmup_steps` times *without* data collection. Defaults to 0; agents already start with realistic knowledge from the IC table.
 
-> **Current IC status:** `set_lang_ics` (in `agent.py`) routes every store through
-> `_set_null_lang_attrs` — all agents start knowing nothing. `warmup_steps` is the
-> current mechanism for reaching a realistic state. Restoring legacy graded ICs is
-> deferred (see `scripts/build_ics.py`, a WIP reproduction, and the follow-up plan).
+## `_build_cdfs` (`model.py:158`)
 
-## `_build_cdfs` (`model.py:157-171`)
-
+Delegates to `zipf_generator.age_indexed_cdfs(vocab_red, max_life_steps, steps_per_year)`.
 For each age `0..3599`, `n = max(vocab_ceiling_curve(age), vocab_red)` gives the
 raw vocabulary ceiling, then `Zipf_Mand_3S_CDF_comp(n, n_red=vocab_red)` compresses
 it to a `vocab_red`-length CDF. `cdf_data['s'][age]` is consumed by `randZipf`
 in `pick_vocab`/`study_vocab` and by `len()` in pct-knowledge calcs.
 
+## `_build_ics` (`model.py:169`)
+
+`self.lang_ICs = ic_generator.load_or_build_lang_ics(self.cdf_data['s'])`. The table is
+`lang_ICs['{p}_pct'][field][age, word]` for `p in {10, 25, 50, 75, 90, 100}` and
+`field in {'t', 'S', 'wc'}`, each `(max_life_steps, vocab_red)`, read-only. It is
+built from this model's CDFs, so it always matches `vocab_red`. It is cached
+in-process and on disk; see [ic_generator.md](ic_generator.md). Agents copy rows
+from it in `set_lang_ics` (see [agent.md](agent.md)). It stays referenced for the
+whole run because agents created later (immigrant families, new teachers via
+`city_objects.py:240`) also call `set_lang_ics`.
+
 ## Demography curves
 
-- **`set_conv_length_age_factor(age_1=14, age_2=65, ...)`** (`model.py:188`): a 3-section curve (S-curve rise in childhood → plateau at 1 → exponential decay after 65), stored inverted as `conv_length_age_factor` (indexed by age-step). Modulates how many words agents utter by age.
-- **`set_death_prob_curve(a,b,c)`** (`model.py:225`): fitted Gompertz-type per-step death probability (`de Beer / TOPALS`; life expectancy ≈77y, std ≈15y), divided by `steps_per_year`.
+- **`set_conv_length_age_factor(age_1=14, age_2=65, ...)`** (`model.py:195`): a 3-section curve (S-curve rise in childhood → plateau at 1 → exponential decay after 65), stored inverted as `conv_length_age_factor` (indexed by age-step). Modulates how many words agents utter by age.
+- **`set_death_prob_curve(a,b,c)`** (`model.py:232`): fitted Gompertz-type per-step death probability (`de Beer / TOPALS`; life expectancy ≈77y, std ≈15y), divided by `steps_per_year`.
 
-## `get_newborn_lang(parent1, parent2)` (`model.py:240`)
+## `get_newborn_lang(parent1, parent2)` (`model.py:247`)
 
 Static. Decides the newborn's language type and which language each parent speaks
 to it, from the parents' L1/L2 pct knowledge. **Modernization fix:** normalizes the
-probability vector with a uniform fallback when `pcs.sum() == 0` (avoids a
-divide-by-zero under null ICs).
+probability vector with a uniform fallback when `pcs.sum() == 0`. That case was
+reachable under the old null ICs; with real ICs it only remains as a guard.
+
+## `set_lang_ics_in_family(family)` (`model.py:480`)
+
+Called by `GeoMapper.create_new_family` for every family of 4 (`[father, mother,
+child, child]`). It sets each member's ICs and correlates children's bilingual
+level with their parents':
+- **At least one bilingual parent:** each bilingual parent draws `k` from
+  `ic_pct_keys`. Each child gets a key derived from the parents. With one
+  bilingual parent it is the midpoint between that parent's `k` and the
+  monolingual parent's pole: `(k+100)/2` if the other parent is L1-mono, `k/2`
+  otherwise. With two bilingual parents it is the mean of their `k`. The result
+  is snapped to `ic_pct_keys` (`bisect_left`).
+- **Monolingual parents:** parents get monolingual ICs. A child labelled
+  bilingual gets `biling_key=90`, i.e. 90 % **L1**. *Legacy quirk:* this happens
+  even when the parents are L2-monolingual, which contradicts the code comment
+  ("much better knowledge of parents lang"). Kept as-is.
+
+`get_lang_fam_members(family)` (`model.py:528`) then derives the in-family languages
+(consorts, child↔father, child↔mother, siblings) via `get_conv_params`, so it depends
+on the ICs just set.
 
 ## The conversation engine
 
-### `run_conversation(ag_init, others, bystander=None, def_conv_length='M', num_days=10)` (`model.py:280`)
+### `run_conversation(ag_init, others, bystander=None, def_conv_length='M', num_days=10)` (`model.py:287`)
 
 1. Build `ags = [ag_init, *others]`.
 2. `conv_params = get_conv_params(ags, ...)` (may raise `ZeroDivisionError` → conversation aborted).
@@ -83,7 +110,7 @@ divide-by-zero under null ICs).
 
 The **speak (ds_factor=1) vs listen (ds_factor=0.1) asymmetry** is applied here: speakers reinforce memory ~10× more than listeners.
 
-### `get_conv_params(ags, def_conv_length='M')` (`model.py:331`) — MAXIMIN
+### `get_conv_params(ags, def_conv_length='M')` (`model.py:338`) — MAXIMIN
 
 Implements Van Parijs's MAXIMIN language rule. Returns a `conv_params` dict:
 `lang_group` (per-agent language, tuple), `mute_type` (language type that must stay
@@ -103,21 +130,20 @@ Decision logic by the **set of language types present** (`ags_lang_types`):
 already-known interlocutors (relationship-specific stickiness via
 `known_people_network[ag_init][ag]['lang']`), falling back to a default for unknowns.
 
-## `run_model(steps, save_data_freq=50, pickle_model_freq=5000, viz_steps_period=None, save_dir='')` (`model.py:742`)
+## `run_model(steps, save_data_freq=50, pickle_model_freq=5000, viz_steps_period=None, save_dir='')` (`model.py:749`)
 
 Sets `save_dir` on both the model and the `data_process`, then loops `steps` times:
 `step()` (= `schedule.step()` + `data_process.collect()`), and periodically
 `save_model_data` (Parquet parts), `pickle_model` (dill), and viz frames.
 Progress bar via `tqdm`.
 
-## `update_centers()` (`model.py:716`)
+## `update_centers()` (`model.py:723`)
 
 Called yearly by the scheduler. Two phases across all clusters:
 **phase 1** (`update_courses_phase_1` on faculties + schools; `set_lang_policy` on jobs),
 then **phase 2** (`update_courses_phase_2`; every 4 years also `swap_teachers_courses`).
 See [city_objects.md](city_objects.md).
 
-Other model methods: `set_lang_ics_in_family` / `get_lang_fam_members` (family IC
-setup, currently null), `add_new_agent_to_model`, `update_friendships`,
+Other model methods: `add_new_agent_to_model`, `update_friendships`,
 `add_immigration_family` / `add_immigration`, `remove_from_locations` /
 `remove_after_death` (deregister agents from grid, schedule, networks, city objects).
