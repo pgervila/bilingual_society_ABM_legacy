@@ -113,7 +113,8 @@ class BiLangModel:
 
         # build age-indexed Zipf CDFs at runtime (replaces legacy lang_cdfs_vs_step.h5)
         self._build_cdfs()
-        self.lang_ICs = None  # legacy IC file dropped; agents use null ICs (see set_lang_ics)
+        # build per-age linguistic initial conditions (replaces legacy lang_spoken_ics_vs_step.h5)
+        self._build_ics()
 
         # set init mode while building the model
         self.init_mode = True
@@ -164,6 +165,17 @@ class BiLangModel:
         from .zipf_generator import age_indexed_cdfs
         self.cdf_data = {'s': age_indexed_cdfs(self.vocab_red, self.max_life_steps,
                                                steps_per_year=self.steps_per_year)}
+
+    def _build_ics(self):
+        """Build the per-age linguistic Initial Conditions table read by agents' set_lang_ics.
+
+        Replaces the legacy lang_spoken_ics_vs_step.h5 file. It is regenerated from the
+        recovered 2019 recipe (see ic_generator) using this model's CDFs, and cached
+        in-process and on disk, so only the first construction pays the build cost.
+        lang_ICs['{p}_pct'][field][age] for field in ('t', 'S', 'wc').
+        """
+        from .ic_generator import load_or_build_lang_ics
+        self.lang_ICs = load_or_build_lang_ics(self.cdf_data['s'])
 
     def check_model_set_up(self):
         # check some key configs in model are correct
