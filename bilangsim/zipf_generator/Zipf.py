@@ -103,6 +103,20 @@ def vocab_ceiling_curve(age_steps, steps_per_year=36, n_min=500, n_max=10000,
     return np.rint(n).astype(np.int64)
 
 
+def age_indexed_cdfs(vocab_red, max_life_steps, steps_per_year=36):
+    """Stack of compressed 3-stage Zipf-Mandelbrot CDFs, one row per age step.
+
+    Row `age` is the CDF over `vocab_red` compressed word indices for an agent of
+    `age` steps; the raw vocabulary size comes from `vocab_ceiling_curve`.
+    Output shape: (max_life_steps, vocab_red).
+    """
+    cdfs = np.empty((max_life_steps, vocab_red), dtype=np.float64)
+    for age in range(max_life_steps):
+        n = max(int(vocab_ceiling_curve(age, steps_per_year=steps_per_year)), vocab_red)
+        cdfs[age] = Zipf_Mand_3S_CDF_comp(n, n_red=vocab_red)
+    return cdfs
+
+
 def randZipf(zipf_cum_distr, numSamples):
     """fast computation of array of Zipf samples with dim = numSamples
     It needs Zipf CDF as input"""

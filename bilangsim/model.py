@@ -161,14 +161,9 @@ class BiLangModel:
         CDF over compressed word indices for an agent of `age` steps, consumed by
         randZipf() in pick_vocab/study_vocab and by len() in the pct-knowledge calc.
         """
-        from .zipf_generator.Zipf import Zipf_Mand_3S_CDF_comp, vocab_ceiling_curve
-        n_ages = self.max_life_steps
-        cdfs = np.empty((n_ages, self.vocab_red), dtype=np.float64)
-        for age in range(n_ages):
-            n = max(int(vocab_ceiling_curve(age, steps_per_year=self.steps_per_year)),
-                    self.vocab_red)
-            cdfs[age] = Zipf_Mand_3S_CDF_comp(n, n_red=self.vocab_red)
-        self.cdf_data = {'s': cdfs}
+        from .zipf_generator import age_indexed_cdfs
+        self.cdf_data = {'s': age_indexed_cdfs(self.vocab_red, self.max_life_steps,
+                                               steps_per_year=self.steps_per_year)}
 
     def check_model_set_up(self):
         # check some key configs in model are correct
