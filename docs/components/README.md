@@ -7,7 +7,9 @@ current behaviour differs from the legacy model or is a known caveat, it is
 flagged inline.
 
 For the scientific model narrative and the catalogue of known model bugs, see
-`../legacy_language_model_analysis.md`. For the modernization history, see
+`../legacy_language_model_analysis.md`. For an in-depth analysis of the per-word
+memory model (shortcomings, impact, improvement options), see
+`../memory_model_analysis.md`. For the modernization history, see
 `../superpowers/plans/2026-05-14-tech-stack-modernization.md`.
 
 ## Modules

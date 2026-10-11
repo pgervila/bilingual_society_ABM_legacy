@@ -2,6 +2,8 @@
 
 ~2200 lines. The scientific heart of the model. Read
 `../legacy_language_model_analysis.md` before changing any learning/memory logic.
+For the memory model's known shortcomings and improvement options, see
+`../memory_model_analysis.md`.
 
 ## Module-level numba helpers (`agent.py:15-52`)
 

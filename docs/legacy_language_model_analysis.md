@@ -42,9 +42,11 @@ This is the **Ebbinghaus forgetting curve**, parameterised by an SM-2-style "sta
 
 On activation (speaking or hearing a word), stability is bumped up via a non-trivial SuperMemo-derived formula (`numba_comp_delta_S`, line 16):
 
-$$\Delta S = \text{ds\_factor} \cdot \left( \text{act\_c} \cdot S^{-b} \cdot R \cdot a \cdot e^{c \cdot 100 \cdot d} + g \right)$$
+$$\Delta S = \text{ds\_factor} \cdot \text{act\_c} \cdot \left( a \cdot S^{-b} \cdot e^{c \cdot 100 \cdot R} + d \right)$$
 
-with `a=7.6, b=0.023, c=-0.031, d=-0.2`. After the bump, `t` resets to 0; for *un*activated words, `t += 1` per step (`agent.py:753`), so their `R` decays exponentially without bound.
+with `a=7.6, b=0.023, c=-0.031, d=-0.2`. The live code applies it twice per call: once with `act_c`, then with `act_c - 1` on the updated `S`, with the old `R`. After the bump, `t` resets to 0. For *un*activated words, `t += 1` per step (`agent.py:757-759`), so their `R` decays exponentially without bound.
+
+> The formula comes from SuperMemo's *multiplicative* stability-increase factor (`a=76, d=-2`, `S ← S·SInc`). The code uses it additively, with `a` and `d` divided by 10. This and the other weaknesses of the memory model are analysed in depth, with worked numbers and improvement options, in [`memory_model_analysis.md`](memory_model_analysis.md).
 
 The `ds_factor` term is the key asymmetry: **speaking uses ds_factor = 1.0, listening uses 0.1** (`agent.py:546, 551`). Production reinforces memory ~10× more than comprehension — a sound empirical finding in SLA research.
 
@@ -113,6 +115,8 @@ Three channels feed L2 into an initially monolingual child:
 - **MAXIMIN with conversation history** correctly captures the "we always speak X together" stickiness real bilingual dyads exhibit.
 
 ### Weaknesses & questionable choices
+
+> The memory-model weaknesses (reinforcement rule, forgetting curve, the `pct` measure, slot compression, IC/live consistency) are analysed in depth in [`memory_model_analysis.md`](memory_model_analysis.md). The list below covers the language model as a whole.
 
 1. **Known bug in L12/L21 percentage update** — `pct` for `L12` is documented as never updated (`agent.py:916`), which breaks the dominance comparison at `pick_vocab` step 2. The intended logic silently degrades.
 2. **L12/L21 never receive direct learning.** They only grow as fallback artefacts. Real bilinguals can study code-switched registers explicitly (e.g. Spanglish slang); the model has no path for that.
