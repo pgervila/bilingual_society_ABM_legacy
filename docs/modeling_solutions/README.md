@@ -56,6 +56,7 @@ are learned rather than imported.
 | File | Content |
 |---|---|
 | [`embeddings_and_vector_databases.md`](embeddings_and_vector_databases.md) | What embeddings and vector databases are and contain; four roles they could play; a check against R1–R8; verdicts; a gate for adding embeddings; an experiment that settles the question for A1; the neighbour-table benchmark |
+| [`legacy_best_ideas.md`](legacy_best_ideas.md) | The ideas of the legacy model worth carrying into the new implementation, across the whole model: causal loop, life course, geography and demography, families and transmission, networks, conversations and MAXIMIN, institutions and policy levers, learning, motivation, initial conditions and outputs. Also: ideas sketched but never finished, flaws not to carry over, and where each idea goes in the new design. The new implementation keeps no legacy code. |
 | [`essential_language_features.md`](essential_language_features.md) | The five features: why each is essential, what realism requires, an embedding-free mechanism, data sources, a verdict. Also: realistic learning across features, what was left out, an embedding-free layered design, new validation targets V19–V23, and implications for the LMNA plan. |
 
 ## Suggested changes to the plan in LMNA
@@ -70,3 +71,8 @@ are learned rather than imported.
 4. Run B0 with both embedding and hand-built semantic input, to test whether
    B's results depend on the embeddings.
 5. Keep C as the only route to emergent grammar, with no vector database.
+6. Drop the `legacy` plug-in and the legacy-vs-new comparisons (LMNA §3.1
+   rule 4, §3.3, §7.2 step 3). The new implementation starts from a fresh
+   repository and keeps only the legacy *ideas*
+   ([`legacy_best_ideas.md`](legacy_best_ideas.md)). It is validated against
+   data, not against legacy output.
